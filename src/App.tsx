@@ -485,7 +485,7 @@ const App = () => {
   return (
     <div className="min-h-screen px-4 py-6 md:py-10 md:px-10">
       <div className="max-w-5xl mx-auto space-y-6">
-        <header className="relative overflow-hidden rounded-[28px] border border-slate-800 bg-slate-900/80/90 shadow-xl">
+        <header className="relative overflow-hidden rounded-[28px] border border-slate-800 bg-slate-900 shadow-xl">
           <div className="relative grid gap-6 p-6 md:grid-cols-[1.1fr,0.9fr] md:items-center">
             <div className="space-y-3">
               <div className="flex items-center gap-3">
