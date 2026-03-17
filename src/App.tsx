@@ -19,7 +19,6 @@ import {
   Download,
   Upload,
   AlertTriangle,
-  ChevronDown,
   ChevronUp,
   CircleDot,
   CircleDashed,
@@ -486,6 +485,18 @@ const App = () => {
     <div className="min-h-screen px-4 py-6 md:py-10 md:px-10">
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="relative overflow-hidden rounded-[28px] border border-slate-800 bg-slate-900 shadow-xl">
+          <button
+            onClick={() => setShowHistory((prev) => !prev)}
+            className={`absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border text-xs font-bold uppercase tracking-widest transition-all ${
+              showHistory
+                ? 'bg-slate-100 text-slate-900 border-slate-200'
+                : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-100'
+            }`}
+            aria-label={showHistory ? 'Back to Timer' : 'Run History'}
+            title={showHistory ? 'Back to Timer' : 'Run History'}
+          >
+            <History className="h-4 w-4" />
+          </button>
           <div className="relative grid gap-6 p-6 md:grid-cols-[1.1fr,0.9fr] md:items-center">
             <div className="space-y-3">
               <div className="flex items-center gap-3">
@@ -532,28 +543,36 @@ const App = () => {
                   <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Split {Math.max(1, nextStepIndex + 1)}</div>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 <button
-                  onClick={() => setShowHistory((prev) => !prev)}
-                  className={`flex-1 flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-xs font-bold uppercase tracking-widest transition-all ${
-                    showHistory
-                      ? 'bg-slate-900 text-white border-slate-900'
+                  onClick={() => {
+                    if (Object.keys(segments).length && !confirm('Reset split order?')) return;
+                    setMode('forward');
+                    setSegments({});
+                  }}
+                  className={`flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-xs font-bold uppercase tracking-widest ${
+                    mode === 'forward'
+                      ? 'bg-blue-600 text-white border-blue-600'
                       : 'bg-slate-900/80 text-slate-400 border-slate-800'
                   }`}
                 >
-                  <History className="h-4 w-4" />
-                  {showHistory ? 'Back to Timer' : 'Run History'}
+                  <Building2 className="h-4 w-4" />
+                  Going to Work
                 </button>
                 <button
                   onClick={() => {
                     if (Object.keys(segments).length && !confirm('Reset split order?')) return;
-                    setMode((prev) => (prev === 'forward' ? 'reverse' : 'forward'));
+                    setMode('reverse');
                     setSegments({});
                   }}
-                  className="flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-xs font-bold uppercase tracking-widest text-slate-500"
+                  className={`flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-xs font-bold uppercase tracking-widest ${
+                    mode === 'reverse'
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-slate-900/80 text-slate-400 border-slate-800'
+                  }`}
                 >
-                  {mode === 'forward' ? <Home className="h-4 w-4" /> : <Building2 className="h-4 w-4" />}
-                  Swap Route
+                  <Home className="h-4 w-4" />
+                  Going Home
                 </button>
               </div>
             </div>
@@ -751,37 +770,6 @@ const App = () => {
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg speed-grid">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">Controls</h3>
-                  <div className="mt-4 grid gap-3">
-                    <button
-                      onClick={() => setMode('forward')}
-                      className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-sm font-black ${
-                        mode === 'forward'
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-slate-900/80 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Building2 className="h-4 w-4" /> To Work
-                      </span>
-                      {mode === 'forward' ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-                    </button>
-                    <button
-                      onClick={() => setMode('reverse')}
-                      className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-sm font-black ${
-                        mode === 'reverse'
-                          ? 'bg-indigo-600 text-white border-indigo-600'
-                          : 'bg-slate-900/80 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Home className="h-4 w-4" /> To Home
-                      </span>
-                      {mode === 'reverse' ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
               </div>
             </motion.section>
           ) : (
