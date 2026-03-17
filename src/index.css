@@ -1,0 +1,62 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --bg: 7 11 20;
+  --panel: 15 23 42;
+  --ink: 226 232 240;
+  --muted: 148 163 184;
+  --accent: 56 189 248;
+  --accent-2: 34 197 94;
+  --warning: 251 191 36;
+  --danger: 248 113 113;
+  --glow: 14 116 144;
+  --grid: 30 41 59;
+  --speed: 226 232 240;
+  --speed-2: 148 163 184;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  font-family: var(--sans);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, rgba(56, 189, 248, 0.15), transparent 45%),
+    radial-gradient(circle at 20% 20%, rgba(34, 197, 94, 0.12), transparent 40%),
+    linear-gradient(120deg, rgba(15, 23, 42, 0.6), transparent 35%),
+    rgb(var(--bg));
+  color: rgb(var(--ink));
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.35);
+}
+
+.speed-grid {
+  background-image: linear-gradient(transparent 23px, rgba(30, 41, 59, 0.6) 24px),
+    linear-gradient(90deg, transparent 23px, rgba(30, 41, 59, 0.6) 24px);
+  background-size: 24px 24px;
+  background-position: -6px -6px;
+}
+
+.glow-ring {
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2), 0 12px 40px rgba(14, 116, 144, 0.35);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.split-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.split-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.6);
+  border-radius: 999px;
+}
