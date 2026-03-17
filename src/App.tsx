@@ -66,14 +66,14 @@ const appId = (import.meta.env.VITE_FIREBASE_APP_ID as string | undefined) ?? 'c
 const usingFirebase = Boolean(firebaseConfigEnv && firebaseConfigEnv.trim().length > 0);
 
 const colorMap: Record<string, string> = {
-  Driving: 'border-orange-200 bg-orange-50/60 text-orange-700',
-  'Driving Home': 'border-orange-200 bg-orange-50/60 text-orange-700',
-  'Walk to Stop': 'border-emerald-200 bg-emerald-50/60 text-emerald-700',
-  'Wait for Bus': 'border-sky-200 bg-sky-50/60 text-sky-700',
-  'Bus Transit': 'border-violet-200 bg-violet-50/60 text-violet-700',
-  'Walk to Office': 'border-rose-200 bg-rose-50/60 text-rose-700',
-  'Walk to Car': 'border-rose-200 bg-rose-50/60 text-rose-700',
-  'Total Trip': 'bg-slate-900 text-white border-slate-900'
+  Driving: 'border-orange-500/30 bg-orange-500/10 text-orange-200',
+  'Driving Home': 'border-orange-500/30 bg-orange-500/10 text-orange-200',
+  'Walk to Stop': 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+  'Wait for Bus': 'border-sky-500/30 bg-sky-500/10 text-sky-200',
+  'Bus Transit': 'border-violet-500/30 bg-violet-500/10 text-violet-200',
+  'Walk to Office': 'border-rose-500/30 bg-rose-500/10 text-rose-200',
+  'Walk to Car': 'border-rose-500/30 bg-rose-500/10 text-rose-200',
+  'Total Trip': 'bg-slate-950 text-white border-slate-800'
 };
 
 const forwardSteps: Step[] = [
