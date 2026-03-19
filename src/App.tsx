@@ -96,6 +96,7 @@ const reverseSteps: Step[] = [
 
 const storageKey = 'csr_runs_v1';
 const localUserKey = 'csr_user_id';
+const inProgressKey = 'csr_in_progress_v1';
 
 const getDurationInMs = (start?: Date, end?: Date) => {
   if (!start || !end) return null;
@@ -220,6 +221,24 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    const raw = localStorage.getItem(inProgressKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { mode: Mode; segments: Record<string, string> };
+      if (parsed?.segments && Object.keys(parsed.segments).length > 0) {
+        setMode(parsed.mode);
+        setSegments(
+          Object.fromEntries(
+            Object.entries(parsed.segments).map(([key, value]) => [key, new Date(value)])
+          )
+        );
+      }
+    } catch {
+      localStorage.removeItem(inProgressKey);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!usingFirebase) {
       const id = ensureLocalUser();
       setUserId(id);
@@ -273,6 +292,20 @@ const App = () => {
     if (first && !last) return getDurationInMs(first, liveNow) ?? null;
     return getDurationInMs(first, last);
   }, [segments, currentSteps, liveNow]);
+
+  useEffect(() => {
+    if (Object.keys(segments).length === 0 || isFinished) {
+      localStorage.removeItem(inProgressKey);
+      return;
+    }
+    const serialized = {
+      mode,
+      segments: Object.fromEntries(
+        Object.entries(segments).map(([key, value]) => [key, value.toISOString()])
+      )
+    };
+    localStorage.setItem(inProgressKey, JSON.stringify(serialized));
+  }, [segments, mode, isFinished]);
 
   const detailedStats = useMemo(() => {
     if (history.length === 0) return null;
@@ -348,6 +381,7 @@ const App = () => {
       if (!confirm('Discard current progress?')) return;
     }
     setSegments({});
+    localStorage.removeItem(inProgressKey);
   };
 
   const undoLast = () => {
@@ -392,6 +426,7 @@ const App = () => {
         persistLocalRuns(updated);
       }
       setSegments({});
+      localStorage.removeItem(inProgressKey);
     } finally {
       setIsSaving(false);
     }
