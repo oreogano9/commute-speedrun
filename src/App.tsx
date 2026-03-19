@@ -22,7 +22,9 @@ import {
   ChevronUp,
   CircleDot,
   CircleDashed,
-  Flame
+  Flame,
+  Moon,
+  Rabbit
 } from 'lucide-react';
 import {
   initializeApp,
@@ -44,10 +46,15 @@ import {
 } from 'firebase/firestore';
 
 type Mode = 'forward' | 'reverse';
+type Category = 'normal' | 'night';
+type RunKey = `${Category}:${Mode}`;
 type SegmentMap = Record<string, Date>;
+
+const makeRunKey = (cat: Category, m: Mode): RunKey => `${cat}:${m}`;
 
 type RunRecord = {
   id: string;
+  category: Category;
   mode: Mode;
   totalMs: number;
   date: Date;
@@ -73,6 +80,9 @@ const colorMap: Record<string, string> = {
   'Bus Transit': 'border-violet-500/30 bg-violet-500/10 text-violet-200',
   'Walk to Office': 'border-rose-500/30 bg-rose-500/10 text-rose-200',
   'Walk to Car': 'border-rose-500/30 bg-rose-500/10 text-rose-200',
+  'Walk to 2nd Stop': 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+  'Wait for 2nd Bus': 'border-sky-500/30 bg-sky-500/10 text-sky-200',
+  '2nd Bus Transit': 'border-violet-500/30 bg-violet-500/10 text-violet-200',
   'Total Trip': 'bg-slate-950 text-white border-slate-800'
 };
 
@@ -93,6 +103,24 @@ const reverseSteps: Step[] = [
   { id: 'parking', label: 'At Car', icon: <ParkingCircle />, segment: 'Driving Home' },
   { id: 'car', label: 'Got Home', icon: <Home /> }
 ];
+
+const nightForwardSteps: Step[] = [
+  { id: 'car', label: 'Got in Car', icon: <Car />, segment: 'Driving' },
+  { id: 'parking', label: 'Arrived at Parking', icon: <ParkingCircle />, segment: 'Walk to Stop' },
+  { id: 'busStop', label: 'At Bus Stop', icon: <Clock />, segment: 'Wait for Bus' },
+  { id: 'busArrival', label: 'Bus Arrived', icon: <Bus />, segment: 'Bus Transit' },
+  { id: 'busDest', label: 'Bus Destination', icon: <Timer />, segment: 'Walk to 2nd Stop' },
+  { id: 'busStop2', label: 'At 2nd Bus Stop', icon: <Clock />, segment: 'Wait for 2nd Bus' },
+  { id: 'busArrival2', label: '2nd Bus Arrived', icon: <Bus />, segment: '2nd Bus Transit' },
+  { id: 'checkpoint', label: 'At Checkpoint', icon: <Flag /> }
+];
+
+const nightReverseSteps: Step[] = reverseSteps;
+
+const getSteps = (cat: Category, m: Mode): Step[] => {
+  if (cat === 'night') return m === 'forward' ? nightForwardSteps : nightReverseSteps;
+  return m === 'forward' ? forwardSteps : reverseSteps;
+};
 
 const storageKey = 'csr_runs_v1';
 const localUserKey = 'csr_user_id';
@@ -159,10 +187,12 @@ const loadLocalRuns = (): RunRecord[] => {
   try {
     const parsed = JSON.parse(raw) as Array<Omit<RunRecord, 'date' | 'segments'> & {
       date: string;
+      category?: string;
       segments: Record<string, string>;
     }>;
     return parsed.map((run) => ({
       ...run,
+      category: (run.category ?? 'normal') as Category,
       date: new Date(run.date),
       segments: Object.fromEntries(
         Object.entries(run.segments).map(([key, value]) => [key, new Date(value)])
@@ -196,12 +226,14 @@ const App = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
+  const [category, setCategory] = useState<Category>('normal');
   const [mode, setMode] = useState<Mode>('forward');
   const [segments, setSegments] = useState<SegmentMap>({});
   const [history, setHistory] = useState<RunRecord[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [statsViewCategory, setStatsViewCategory] = useState<Category>('normal');
   const [statsViewMode, setStatsViewMode] = useState<Mode>('forward');
   const [liveNow, setLiveNow] = useState<Date>(new Date());
 
@@ -224,8 +256,9 @@ const App = () => {
     const raw = localStorage.getItem(inProgressKey);
     if (!raw) return;
     try {
-      const parsed = JSON.parse(raw) as { mode: Mode; segments: Record<string, string> };
+      const parsed = JSON.parse(raw) as { category?: string; mode: Mode; segments: Record<string, string> };
       if (parsed?.segments && Object.keys(parsed.segments).length > 0) {
+        setCategory((parsed.category ?? 'normal') as Category);
         setMode(parsed.mode);
         setSegments(
           Object.fromEntries(
@@ -266,7 +299,9 @@ const App = () => {
           ...(snap.data() as Omit<RunRecord, 'id' | 'date' | 'segments'> & {
             date?: unknown;
             segments?: Record<string, unknown>;
+            category?: string;
           }),
+          category: ((snap.data().category ?? 'normal') as Category),
           date: parseDate(snap.data().date),
           segments: Object.fromEntries(
             Object.entries(snap.data().segments ?? {}).map(([key, value]) => [
@@ -282,7 +317,7 @@ const App = () => {
     return () => unsubscribe();
   }, [db, userId]);
 
-  const currentSteps = mode === 'forward' ? forwardSteps : reverseSteps;
+  const currentSteps = getSteps(category, mode);
   const nextStepIndex = currentSteps.findIndex((step) => !segments[step.id]);
   const isFinished = nextStepIndex === -1 && Object.keys(segments).length > 0;
 
@@ -299,29 +334,30 @@ const App = () => {
       return;
     }
     const serialized = {
+      category,
       mode,
       segments: Object.fromEntries(
         Object.entries(segments).map(([key, value]) => [key, value.toISOString()])
       )
     };
     localStorage.setItem(inProgressKey, JSON.stringify(serialized));
-  }, [segments, mode, isFinished]);
+  }, [segments, mode, category, isFinished]);
 
   const detailedStats = useMemo(() => {
     if (history.length === 0) return null;
-    const results: Record<Mode, { label: string; avg: number; best: number; worst: number }[]> = {
-      forward: [],
-      reverse: []
-    };
+    const allKeys: RunKey[] = ['normal:forward', 'normal:reverse', 'night:forward', 'night:reverse'];
+    const results: Partial<Record<RunKey, { label: string; avg: number; best: number; worst: number }[]>> = {};
 
-    (['forward', 'reverse'] as Mode[]).forEach((m) => {
-      const modeRuns = history.filter((h) => h.mode === m);
-      if (!modeRuns.length) return;
+    allKeys.forEach((key) => {
+      const [cat, m] = key.split(':') as [Category, Mode];
+      const steps = getSteps(cat, m);
+      const keyedRuns = history.filter(
+        (h) => (h.category ?? 'normal') === cat && h.mode === m
+      );
+      if (!keyedRuns.length) return;
 
-      const steps = m === 'forward' ? forwardSteps : reverseSteps;
       const segmentDurations: Record<string, number[]> = {};
-
-      modeRuns.forEach((run) => {
+      keyedRuns.forEach((run) => {
         for (let i = 0; i < steps.length - 1; i += 1) {
           const label = steps[i].segment ?? steps[i].label;
           const start = run.segments[steps[i].id];
@@ -336,7 +372,7 @@ const App = () => {
         segmentDurations['Total Trip'].push(run.totalMs);
       });
 
-      results[m] = Object.entries(segmentDurations).map(([label, durs]) => ({
+      results[key] = Object.entries(segmentDurations).map(([label, durs]) => ({
         label,
         avg: Math.round(durs.reduce((a, b) => a + b, 0) / durs.length),
         best: Math.min(...durs),
@@ -348,13 +384,17 @@ const App = () => {
   }, [history]);
 
   const personalBest = useMemo(() => {
-    const modeRuns = history.filter((run) => run.mode === mode);
+    const modeRuns = history.filter(
+      (run) => (run.category ?? 'normal') === category && run.mode === mode
+    );
     if (!modeRuns.length) return null;
     return Math.min(...modeRuns.map((run) => run.totalMs));
-  }, [history, mode]);
+  }, [history, mode, category]);
 
   const goldSplits = useMemo(() => {
-    const modeRuns = history.filter((run) => run.mode === mode);
+    const modeRuns = history.filter(
+      (run) => (run.category ?? 'normal') === category && run.mode === mode
+    );
     const steps = currentSteps;
     const gold: Record<string, number> = {};
     modeRuns.forEach((run) => {
@@ -370,7 +410,7 @@ const App = () => {
       });
     });
     return gold;
-  }, [history, mode, currentSteps]);
+  }, [history, mode, category, currentSteps]);
 
   const logTime = (stepId: string) => {
     setSegments((prev) => ({ ...prev, [stepId]: new Date() }));
@@ -404,6 +444,7 @@ const App = () => {
     try {
       const run: RunRecord = {
         id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
+        category,
         mode,
         totalMs: totalTimeMs ?? 0,
         date: new Date(),
@@ -415,6 +456,7 @@ const App = () => {
 
       if (usingFirebase && db) {
         await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'runs'), {
+          category: run.category,
           mode: run.mode,
           totalMs: run.totalMs,
           date: run.date,
@@ -475,6 +517,7 @@ const App = () => {
           }
           return {
             id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
+            category: (item.category ?? 'normal') as Category,
             mode: (item.mode ?? 'forward') as Mode,
             totalMs: item.totalMs ?? 0,
             date: item.date ? new Date(item.date) : new Date(),
@@ -485,6 +528,7 @@ const App = () => {
         if (usingFirebase && db) {
           for (const item of cleaned) {
             await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'runs'), {
+              category: item.category,
               mode: item.mode,
               totalMs: item.totalMs,
               date: item.date,
@@ -551,7 +595,7 @@ const App = () => {
               </p>
               <div className="flex flex-wrap gap-2">
                 <span className="px-3 py-1 rounded-full bg-slate-900 text-white text-xs font-bold uppercase tracking-wide">
-                  {mode === 'forward' ? 'To Work' : 'To Home'}
+                  {category === 'night' ? 'Night% · ' : ''}{mode === 'forward' ? 'To Work' : 'To Home'}
                 </span>
                 {personalBest && (
                   <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wide flex items-center gap-1">
@@ -572,11 +616,62 @@ const App = () => {
                   <span className="mono text-slate-400">{formatClock(liveNow)}</span>
                 </div>
                 <div className="mt-3 flex items-end justify-between">
-                  <div className="mono text-4xl md:text-5xl font-bold text-cyan-300">
-                    {formatDuration(totalTimeMs)}
+                  <div className={`mono text-4xl md:text-5xl font-bold transition-colors ${Object.keys(segments).length === 0 ? 'text-slate-600' : 'text-cyan-300'}`}>
+                    {Object.keys(segments).length === 0 ? '--:--' : formatDuration(totalTimeMs)}
                   </div>
-                  <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Split {Math.max(1, nextStepIndex + 1)}</div>
+                  <div className="text-right">
+                    <div className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                      {Object.keys(segments).length === 0
+                        ? 'Ready'
+                        : isFinished
+                          ? `${currentSteps.length} / ${currentSteps.length}`
+                          : `Split ${nextStepIndex + 1} / ${currentSteps.length}`}
+                    </div>
+                    {Object.keys(segments).length === 0 && (
+                      <p className="text-[9px] uppercase tracking-widest text-slate-600 mt-0.5">tap split to start</p>
+                    )}
+                  </div>
                 </div>
+                {/* Progress bar */}
+                {Object.keys(segments).length > 0 && (
+                  <div className="mt-4 h-1 rounded-full bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-cyan-400 transition-all duration-300"
+                      style={{
+                        width: `${(Object.keys(segments).length / currentSteps.length) * 100}%`
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+              {/* Category tabs */}
+              <div className="flex gap-1 rounded-2xl border border-slate-800 bg-slate-900/80 p-1">
+                {(['normal', 'night'] as Category[]).map((cat) => {
+                  const isActive = category === cat;
+                  const hasProgress = isActive && Object.keys(segments).length > 0 && !isFinished;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => {
+                        if (Object.keys(segments).length && !confirm('Switch category? This will reset splits.')) return;
+                        setCategory(cat);
+                        setSegments({});
+                      }}
+                      className={`relative flex-1 rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
+                        isActive
+                          ? cat === 'night'
+                            ? 'bg-slate-800 text-cyan-300 border border-cyan-500/30'
+                            : 'bg-slate-700 text-white'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {cat === 'night' ? 'Night%' : 'Normal%'}
+                      {hasProgress && (
+                        <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-orange-400" />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
@@ -631,7 +726,7 @@ const App = () => {
                       <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
                         Active Split Board
                       </p>
-                      <h2 className="text-lg font-black text-slate-100">{mode === 'forward' ? 'Work Route' : 'Home Route'}</h2>
+                      <h2 className="text-lg font-black text-slate-100">{category === 'night' ? 'Night% · ' : ''}{mode === 'forward' ? 'Work Route' : 'Home Route'}</h2>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -836,82 +931,118 @@ const App = () => {
                   </div>
                 </div>
 
-                {detailedStats && (detailedStats.forward.length > 0 || detailedStats.reverse.length > 0) && (
-                  <div className="rounded-3xl border border-slate-800 bg-slate-900/80 shadow-lg overflow-hidden">
-                    <div className="flex items-center justify-between bg-slate-800/60/60 px-4 py-3">
-                      <h2 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
-                        Segment Performance
-                      </h2>
-                      <div className="flex gap-1 rounded-lg border border-slate-800/60 bg-slate-900/80 p-1 shadow-sm">
-                        <button
-                          onClick={() => setStatsViewMode('forward')}
-                          className={`rounded-md px-2 py-1 text-[9px] font-black uppercase ${
-                            statsViewMode === 'forward'
-                              ? 'bg-blue-600 text-white'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          To Work
-                        </button>
-                        <button
-                          onClick={() => setStatsViewMode('reverse')}
-                          className={`rounded-md px-2 py-1 text-[9px] font-black uppercase ${
-                            statsViewMode === 'reverse'
-                              ? 'bg-indigo-600 text-white'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          To Home
-                        </button>
+                {detailedStats && Object.keys(detailedStats).length > 0 && (() => {
+                  const statsKey = makeRunKey(statsViewCategory, statsViewMode);
+                  return (
+                    <div className="rounded-3xl border border-slate-800 bg-slate-900/80 shadow-lg overflow-hidden">
+                      <div className="flex items-center justify-between bg-slate-800/60/60 px-4 py-3">
+                        <h2 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
+                          Segment Performance
+                        </h2>
+                      </div>
+                      <div className="px-4 pt-3 pb-1 flex flex-col gap-2">
+                        {/* Category tabs */}
+                        <div className="flex gap-1 rounded-lg border border-slate-800/60 bg-slate-900/80 p-1 shadow-sm">
+                          <button
+                            onClick={() => setStatsViewCategory('normal')}
+                            className={`flex-1 rounded-md px-2 py-1 text-[9px] font-black uppercase transition-all ${
+                              statsViewCategory === 'normal'
+                                ? 'bg-slate-700 text-white'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            Normal%
+                          </button>
+                          <button
+                            onClick={() => setStatsViewCategory('night')}
+                            className={`flex-1 rounded-md px-2 py-1 text-[9px] font-black uppercase transition-all ${
+                              statsViewCategory === 'night'
+                                ? 'bg-slate-800 text-cyan-300 border border-cyan-500/30'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            Night%
+                          </button>
+                        </div>
+                        {/* Mode tabs */}
+                        <div className="flex gap-1 rounded-lg border border-slate-800/60 bg-slate-900/80 p-1 shadow-sm">
+                          <button
+                            onClick={() => setStatsViewMode('forward')}
+                            className={`flex-1 rounded-md px-2 py-1 text-[9px] font-black uppercase ${
+                              statsViewMode === 'forward'
+                                ? 'bg-blue-600 text-white'
+                                : 'text-slate-400'
+                            }`}
+                          >
+                            To Work
+                          </button>
+                          <button
+                            onClick={() => setStatsViewMode('reverse')}
+                            className={`flex-1 rounded-md px-2 py-1 text-[9px] font-black uppercase ${
+                              statsViewMode === 'reverse'
+                                ? 'bg-indigo-600 text-white'
+                                : 'text-slate-400'
+                            }`}
+                          >
+                            To Home
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-3 p-4">
+                        {detailedStats[statsKey] && detailedStats[statsKey]!.length > 0 ? (
+                          detailedStats[statsKey]!.map((stat) => {
+                            const colors = colorMap[stat.label] ?? 'bg-slate-800/60 border-slate-800/60 text-slate-500';
+                            const isTotal = stat.label === 'Total Trip';
+                            return (
+                              <div key={stat.label} className={`rounded-2xl border p-3 ${colors}`}>
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-xs font-black uppercase tracking-tight ${isTotal ? 'text-blue-100' : ''}`}>
+                                    {stat.label}
+                                  </span>
+                                  <span className="mono text-[10px] font-bold opacity-70">Avg: {formatDuration(stat.avg)}</span>
+                                </div>
+                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <Zap className={isTotal ? 'text-blue-300 h-4 w-4' : 'text-emerald-500 h-4 w-4'} />
+                                    <div>
+                                      <p className="text-[8px] font-black uppercase opacity-60">Best</p>
+                                      <p className="mono text-xs font-black">{formatDuration(stat.best)}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <AlertCircle className={isTotal ? 'text-blue-200 h-4 w-4' : 'text-amber-500 h-4 w-4'} />
+                                    <div>
+                                      <p className="text-[8px] font-black uppercase opacity-60">Worst</p>
+                                      <p className="mono text-xs font-black">{formatDuration(stat.worst)}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-center py-6">
+                            <AlertTriangle className="mx-auto h-8 w-8 text-slate-500" />
+                            <p className="mt-2 text-[10px] font-bold uppercase text-slate-500">
+                              No {statsViewCategory === 'night' ? 'Night% ' : ''}{statsViewMode === 'forward' ? 'To Work' : 'To Home'} data yet
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="space-y-3 p-4">
-                      {detailedStats[statsViewMode]?.length > 0 ? (
-                        detailedStats[statsViewMode].map((stat) => {
-                          const colors = colorMap[stat.label] ?? 'bg-slate-800/60 border-slate-800/60 text-slate-500';
-                          const isTotal = stat.label === 'Total Trip';
-                          return (
-                            <div key={stat.label} className={`rounded-2xl border p-3 ${colors}`}>
-                              <div className="flex items-center justify-between">
-                                <span className={`text-xs font-black uppercase tracking-tight ${isTotal ? 'text-blue-100' : ''}`}>
-                                  {stat.label}
-                                </span>
-                                <span className="mono text-[10px] font-bold opacity-70">Avg: {formatDuration(stat.avg)}</span>
-                              </div>
-                              <div className="mt-3 grid grid-cols-2 gap-2">
-                                <div className="flex items-center gap-2">
-                                  <Zap className={isTotal ? 'text-blue-300 h-4 w-4' : 'text-emerald-500 h-4 w-4'} />
-                                  <div>
-                                    <p className="text-[8px] font-black uppercase opacity-60">Best</p>
-                                    <p className="mono text-xs font-black">{formatDuration(stat.best)}</p>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <AlertCircle className={isTotal ? 'text-blue-200 h-4 w-4' : 'text-amber-500 h-4 w-4'} />
-                                  <div>
-                                    <p className="text-[8px] font-black uppercase opacity-60">Worst</p>
-                                    <p className="mono text-xs font-black">{formatDuration(stat.worst)}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-center py-6">
-                          <AlertTriangle className="mx-auto h-8 w-8 text-slate-500" />
-                          <p className="mt-2 text-[10px] font-bold uppercase text-slate-500">
-                            No {statsViewMode} data recorded yet
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               <div className="space-y-3">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400 px-1">Run Log</h3>
+                {history.length === 0 && (
+                  <div className="rounded-2xl border border-slate-800 border-dashed bg-slate-900/40 p-10 flex flex-col items-center gap-3 text-center">
+                    <Rabbit className="h-8 w-8 text-slate-600" />
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-500">No runs yet</p>
+                    <p className="text-[10px] text-slate-600 max-w-[18ch]">Head back to the timer and log your first split</p>
+                  </div>
+                )}
                 {[...history]
                   .sort((a, b) => b.date.getTime() - a.date.getTime())
                   .map((run) => (
@@ -922,18 +1053,35 @@ const App = () => {
                       <div className="flex items-center gap-4">
                         <div
                           className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                            run.mode === 'forward'
-                              ? 'bg-blue-50 text-blue-600'
-                              : 'bg-indigo-50 text-indigo-600'
+                            (run.category ?? 'normal') === 'night'
+                              ? 'bg-cyan-950 text-cyan-400 border border-cyan-800/40'
+                              : run.mode === 'forward'
+                                ? 'bg-blue-950 text-blue-400'
+                                : 'bg-indigo-950 text-indigo-400'
                           }`}
                         >
-                          {run.mode === 'forward' ? <Building2 size={18} /> : <Home size={18} />}
+                          {(run.category ?? 'normal') === 'night'
+                            ? <Moon size={18} />
+                            : run.mode === 'forward'
+                              ? <Building2 size={18} />
+                              : <Home size={18} />}
                         </div>
                         <div className="flex-1">
-                          <p className="text-[10px] font-bold uppercase tracking-tight text-slate-400">
+                          <p className="text-[10px] font-bold uppercase tracking-tight text-slate-500">
                             {formatFullDate(run.date)}
                           </p>
-                          <p className="mono text-lg font-black text-slate-100">{formatDuration(run.totalMs)}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="mono text-lg font-black text-slate-100">{formatDuration(run.totalMs)}</p>
+                            <span className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md ${
+                              (run.category ?? 'normal') === 'night'
+                                ? 'text-cyan-400 bg-cyan-950'
+                                : run.mode === 'forward'
+                                  ? 'text-blue-400 bg-blue-950'
+                                  : 'text-indigo-400 bg-indigo-950'
+                            }`}>
+                              {(run.category ?? 'normal') === 'night' ? 'Night%' : 'Normal%'} · {run.mode === 'forward' ? 'To Work' : 'To Home'}
+                            </span>
+                          </div>
                         </div>
                         <button
                           onClick={() => deleteRun(run.id)}
