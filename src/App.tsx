@@ -773,7 +773,7 @@ const App = () => {
                       const delta = duration ? getDelta(step.id, duration) : null;
 
                       return (
-                        <div key={step.id} className={`flex items-center gap-4 p-4 ${isNext ? 'bg-sky-50/60' : ''}`}>
+                        <div key={step.id} className={`flex items-center gap-4 p-4 ${isNext ? 'bg-slate-800/60' : ''}`}>
                           <div
                             className={`flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-bold transition-all ${
                               isLogged
