@@ -582,32 +582,34 @@ const App = () => {
   return (
     <div className="min-h-screen px-4 py-6 md:py-10 md:px-10">
       <div className="max-w-5xl mx-auto space-y-6">
-        <header className="relative overflow-hidden rounded-[28px] border border-slate-800 bg-slate-900 shadow-xl">
-          <button
-            onClick={() => setShowHistory((prev) => !prev)}
-            className={`absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border text-xs font-bold uppercase tracking-widest transition-all ${
-              showHistory
-                ? 'bg-slate-100 text-slate-900 border-slate-200'
-                : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-100'
-            }`}
-            aria-label={showHistory ? 'Back to Timer' : 'Run History'}
-            title={showHistory ? 'Back to Timer' : 'Run History'}
+        <header className="overflow-hidden rounded-[28px] border border-slate-800 bg-slate-900 shadow-xl">
+          {/* Always-visible title row */}
+          <div className="flex items-center gap-3 px-6 py-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-white flex-shrink-0">
+              <Timer className="h-5 w-5" />
+            </div>
+            <p className="flex-1 text-xs font-bold uppercase tracking-[0.35em] text-slate-400">Commute Speedrun</p>
+            <button
+              onClick={() => setShowHistory((prev) => !prev)}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border text-xs font-bold uppercase tracking-widest transition-all flex-shrink-0 ${
+                showHistory
+                  ? 'bg-slate-100 text-slate-900 border-slate-200'
+                  : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-100'
+              }`}
+              aria-label={showHistory ? 'Back to Timer' : 'Run History'}
+              title={showHistory ? 'Back to Timer' : 'Run History'}
+            >
+              <History className="h-4 w-4" />
+            </button>
+          </div>
+          {/* Collapsible body */}
+          <motion.div
+            animate={{ height: showHistory ? 0 : 'auto', opacity: showHistory ? 0 : 1 }}
+            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+            style={{ overflow: 'hidden' }}
           >
-            <History className="h-4 w-4" />
-          </button>
-          <div className="relative grid gap-6 p-6 md:grid-cols-[1.1fr,0.9fr] md:items-center">
+          <div className="relative grid gap-6 px-6 pb-6 md:grid-cols-[1.1fr,0.9fr] md:items-center">
             <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg">
-                  <Timer className="h-6 w-6" />
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Commute Speedrun</p>
-                  <h1 className="text-2xl md:text-3xl font-black text-slate-900">
-                    Livesplit Tracker
-                  </h1>
-                </div>
-              </div>
               <p className="text-sm text-slate-500 max-w-xl">
                 Split your commute like a game run. Track gold segments, chase PBs, and
                 export your runs to share.
@@ -726,6 +728,7 @@ const App = () => {
               </div>
             </div>
           </div>
+          </motion.div>
         </header>
 
         <AnimatePresence mode="wait">
@@ -1129,6 +1132,42 @@ const App = () => {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Floating split button */}
+      <AnimatePresence>
+        {!showHistory && (
+          <motion.button
+            key="fab"
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 20 }}
+            transition={{ duration: 0.2 }}
+            disabled={isFinished && isSaving}
+            onClick={() => {
+              if (isFinished) {
+                saveRun();
+              } else {
+                const nextStep = currentSteps[nextStepIndex === -1 ? 0 : nextStepIndex];
+                if (nextStep) logTime(nextStep.id);
+              }
+            }}
+            className={`fixed bottom-6 right-6 z-50 flex flex-col items-center justify-center rounded-2xl shadow-2xl px-5 py-3 text-white active:scale-95 transition-transform disabled:opacity-60 ${
+              isFinished ? 'bg-emerald-600' : 'bg-blue-600'
+            }`}
+          >
+            <span className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70">
+              {isFinished
+                ? isSaving ? 'Saving...' : 'Run complete'
+                : Object.keys(segments).length === 0
+                  ? 'Tap to begin'
+                  : currentSteps[nextStepIndex]?.label}
+            </span>
+            <span className="text-base font-black uppercase tracking-widest">
+              {isFinished ? 'Save Run' : Object.keys(segments).length === 0 ? 'Start' : 'Split'}
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
