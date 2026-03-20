@@ -20,8 +20,7 @@ import {
   Upload,
   AlertTriangle,
   X,
-  CircleDot,
-  CircleDashed,
+  ChevronDown,
   Flame,
   Moon,
   Rabbit
@@ -231,6 +230,7 @@ const App = () => {
   const [segments, setSegments] = useState<SegmentMap>({});
   const [editingSegment, setEditingSegment] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
+  const [expandedSegment, setExpandedSegment] = useState<string | null>(null);
   const [history, setHistory] = useState<RunRecord[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -770,89 +770,99 @@ const App = () => {
                       const delta = duration ? getDelta(step.id, duration) : null;
 
                       return (
-                        <div key={step.id} className={`flex items-center gap-4 p-4 ${isNext ? 'bg-slate-800/60' : ''}`}>
-                          <div
-                            className={`flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-bold transition-all ${
-                              isLogged
-                                ? 'bg-emerald-100 text-emerald-600'
-                                : isNext
-                                  ? 'bg-slate-900 text-white shadow-lg'
-                                  : 'bg-slate-800/60 text-slate-500'
-                            }`}
-                          >
-                            {React.cloneElement(step.icon, { size: 18 })}
-                          </div>
-                          <div className="flex-1">
-                            <p className={`text-sm font-bold ${isLogged ? 'text-slate-400' : 'text-slate-100'}`}>
-                              {step.label}
-                            </p>
-                            {timestamp && (
-                              editingSegment === step.id ? (
-                                <input
-                                  autoFocus
-                                  className="mono text-[10px] font-bold text-slate-100 bg-slate-700 rounded px-1 w-20 outline-none"
-                                  value={editingValue}
-                                  onChange={(e) => setEditingValue(e.target.value)}
-                                  onBlur={() => commitEditingSegment(step.id)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') commitEditingSegment(step.id);
-                                    if (e.key === 'Escape') setEditingSegment(null);
-                                  }}
-                                />
-                              ) : (
-                                <p
-                                  className="mono text-[10px] font-bold text-slate-400 cursor-pointer hover:text-slate-200 underline decoration-dotted"
-                                  onClick={() => { setEditingSegment(step.id); setEditingValue(formatClock(timestamp)); }}
-                                >
-                                  {formatClock(timestamp)}
-                                </p>
-                              )
-                            )}
-                          </div>
-                          <div className="text-right">
-                            {duration !== null && (
-                              <p className="mono text-xs font-bold text-slate-200">{formatDuration(duration)}</p>
-                            )}
-                            {delta !== null && (
-                              <p className={`text-[10px] font-bold ${delta <= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                                {delta <= 0 ? '-' : '+'}
-                                {formatDurationCompact(Math.abs(delta))}
+                        <div key={step.id} className={`${isNext ? 'bg-slate-800/60' : ''}`}>
+                          <div className="flex items-center gap-4 p-4">
+                            <div
+                              className={`flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-bold transition-all flex-shrink-0 ${
+                                isLogged
+                                  ? 'bg-emerald-100 text-emerald-600'
+                                  : isNext
+                                    ? 'bg-slate-900 text-white shadow-lg'
+                                    : 'bg-slate-800/60 text-slate-500'
+                              }`}
+                            >
+                              {React.cloneElement(step.icon, { size: 18 })}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-bold ${isLogged ? 'text-slate-400' : 'text-slate-100'}`}>
+                                {step.label}
                               </p>
+                              {timestamp && (
+                                editingSegment === step.id ? (
+                                  <input
+                                    autoFocus
+                                    className="mono text-[10px] font-bold text-slate-100 bg-slate-700 rounded px-1 w-20 outline-none"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    onBlur={() => commitEditingSegment(step.id)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') commitEditingSegment(step.id);
+                                      if (e.key === 'Escape') setEditingSegment(null);
+                                    }}
+                                  />
+                                ) : (
+                                  <p
+                                    className="mono text-[10px] font-bold text-slate-400 cursor-pointer hover:text-slate-200 underline decoration-dotted"
+                                    onClick={() => { setEditingSegment(step.id); setEditingValue(formatClock(timestamp)); }}
+                                  >
+                                    {formatClock(timestamp)}
+                                  </p>
+                                )
+                              )}
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              {duration !== null && (
+                                <p className="mono text-xs font-bold text-slate-200">{formatDuration(duration)}</p>
+                              )}
+                              {delta !== null && (
+                                <p className={`text-[10px] font-bold ${delta <= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                                  {delta <= 0 ? '-' : '+'}
+                                  {formatDurationCompact(Math.abs(delta))}
+                                </p>
+                              )}
+                            </div>
+                            {isLogged ? (
+                              <button
+                                onClick={() => setExpandedSegment(expandedSegment === step.id ? null : step.id)}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 flex-shrink-0"
+                              >
+                                <ChevronDown className={`h-4 w-4 transition-transform ${expandedSegment === step.id ? 'rotate-180' : ''}`} />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => logTime(step.id)}
+                                disabled={idx > nextStepIndex}
+                                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex-shrink-0 ${
+                                  isNext
+                                    ? 'bg-slate-900 text-white'
+                                    : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                                }`}
+                              >
+                                Split
+                              </button>
                             )}
                           </div>
-                          {isLogged ? (
-                            <div className="flex items-center gap-1">
+                          {isLogged && expandedSegment === step.id && (
+                            <div className="flex items-center gap-2 px-4 pb-4">
                               <button
                                 onClick={() => adjustSegment(step.id, -30000)}
-                                className="px-2 py-1 rounded-lg text-[9px] font-black text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700"
+                                className="flex-1 py-2.5 rounded-xl text-xs font-black text-slate-300 bg-slate-800 active:bg-slate-700"
                               >
                                 −30s
                               </button>
                               <button
                                 onClick={() => adjustSegment(step.id, +30000)}
-                                className="px-2 py-1 rounded-lg text-[9px] font-black text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700"
+                                className="flex-1 py-2.5 rounded-xl text-xs font-black text-slate-300 bg-slate-800 active:bg-slate-700"
                               >
                                 +30s
                               </button>
                               <button
-                                onClick={() => deleteSegment(step.id)}
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 bg-slate-800/60 hover:bg-slate-800"
+                                onClick={() => { deleteSegment(step.id); setExpandedSegment(null); }}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-black text-rose-400 bg-slate-800 active:bg-slate-700"
                               >
-                                <X className="h-3.5 w-3.5" />
+                                <X className="h-3.5 w-3.5" /> Delete
                               </button>
                             </div>
-                          ) : (
-                            <button
-                              onClick={() => logTime(step.id)}
-                              disabled={idx > nextStepIndex}
-                              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${
-                                isNext
-                                  ? 'bg-slate-900 text-white'
-                                  : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
-                              }`}
-                            >
-                              Split
-                            </button>
                           )}
                         </div>
                       );
@@ -919,9 +929,9 @@ const App = () => {
                       <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">Split Goals</p>
                       <h3 className="text-lg font-black text-slate-100">Golds & Targets</h3>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                      <CircleDot className="h-4 w-4" /> Gold
-                      <CircleDashed className="h-4 w-4" /> Pending
+                    <div className="flex items-center gap-3 text-xs font-bold">
+                      <span className="flex items-center gap-1 text-emerald-500"><span className="text-base leading-none">●</span> Gold</span>
+                      <span className="flex items-center gap-1 text-slate-400"><span className="text-base leading-none">●</span> Current</span>
                     </div>
                   </div>
                   <div className="mt-4 space-y-3">
