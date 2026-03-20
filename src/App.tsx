@@ -147,6 +147,20 @@ const formatDurationCompact = (ms?: number | null) => {
   return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
 };
 
+const DurationDisplay = ({ ms }: { ms?: number | null }) => {
+  if (ms === null || ms === undefined || Number.isNaN(ms)) return <span>--</span>;
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const millis = Math.floor((ms % 1000) / 10);
+  return (
+    <>
+      {minutes}:{seconds.toString().padStart(2, '0')}
+      <span style={{ fontSize: '0.55em', opacity: 0.75 }}>.{millis.toString().padStart(2, '0')}</span>
+    </>
+  );
+};
+
 const formatClock = (date: Date) =>
   new Intl.DateTimeFormat('en-US', {
     hour: '2-digit',
@@ -213,6 +227,7 @@ const persistLocalRuns = (runs: RunRecord[]) => {
   localStorage.setItem(storageKey, JSON.stringify(serialized));
 };
 
+
 const ensureLocalUser = () => {
   const existing = localStorage.getItem(localUserKey);
   if (existing) return existing;
@@ -231,6 +246,7 @@ const App = () => {
   const [editingSegment, setEditingSegment] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [expandedSegment, setExpandedSegment] = useState<string | null>(null);
+  const [showCharts, setShowCharts] = useState(false);
   const [history, setHistory] = useState<RunRecord[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -620,7 +636,7 @@ const App = () => {
                 </span>
                 {personalBest && (
                   <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold tracking-wide flex items-center gap-1">
-                    <Flame className="h-3 w-3" /> PB {formatDuration(personalBest)}
+                    <Flame className="h-3 w-3" /> PB <DurationDisplay ms={personalBest} />
                   </span>
                 )}
                 {!usingFirebase && (
@@ -638,7 +654,7 @@ const App = () => {
                 </div>
                 <div className="mt-3 flex items-end justify-between">
                   <div className={`mono text-4xl md:text-5xl font-bold transition-colors ${Object.keys(segments).length === 0 ? 'text-slate-600' : 'text-cyan-300'}`}>
-                    {Object.keys(segments).length === 0 ? '--:--' : formatDuration(totalTimeMs)}
+                    {Object.keys(segments).length === 0 ? '--:--' : <DurationDisplay ms={totalTimeMs} />}
                   </div>
                   <div className="text-right">
                     <div className="text-xs uppercase tracking-[0.3em] text-slate-400">
@@ -812,7 +828,7 @@ const App = () => {
                             </div>
                             <div className="text-right flex-shrink-0">
                               {duration !== null && (
-                                <p className="mono text-xs font-bold text-slate-200">{formatDuration(duration)}</p>
+                                <p className="mono text-xs font-bold text-slate-200"><DurationDisplay ms={duration} /></p>
                               )}
                               {delta !== null && (
                                 <p className={`text-[10px] font-bold ${delta <= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
@@ -906,7 +922,7 @@ const App = () => {
                               {gold && dur && (
                                 <span className="text-[10px] font-bold uppercase text-emerald-500">Gold {formatDurationCompact(gold)}</span>
                               )}
-                              <span className="mono font-black text-slate-100">{formatDuration(dur)}</span>
+                              <span className="mono font-black text-slate-100"><DurationDisplay ms={dur} /></span>
                             </div>
                           </div>
                         );
@@ -914,7 +930,7 @@ const App = () => {
                       <div className="mt-4 flex items-center justify-between border-t border-slate-800/60 pt-3">
                         <span className="text-sm font-black text-slate-100">Total</span>
                         <span className="rounded-lg bg-slate-900 px-3 py-1 text-sm font-black text-white">
-                          {formatDuration(totalTimeMs)}
+                          <DurationDisplay ms={totalTimeMs} />
                         </span>
                       </div>
                     </div>
@@ -945,7 +961,7 @@ const App = () => {
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-bold text-slate-400">{step.segment}</span>
                             {gold ? (
-                              <span className="mono text-xs font-black text-emerald-600">{formatDuration(gold)}</span>
+                              <span className="mono text-xs font-black text-emerald-600"><DurationDisplay ms={gold} /></span>
                             ) : (
                               <span className="text-[10px] font-bold uppercase text-slate-500">No data</span>
                             )}
@@ -953,7 +969,7 @@ const App = () => {
                           <div className="mt-2 flex items-center justify-between">
                             <span className="text-[10px] uppercase text-slate-400">Current</span>
                             <span className={`mono text-xs font-black ${duration ? 'text-slate-100' : 'text-slate-500'}`}>
-                              {duration ? formatDuration(duration) : '--'}
+                              {duration ? <DurationDisplay ms={duration} /> : '--'}
                             </span>
                           </div>
                         </div>
@@ -1015,27 +1031,34 @@ const App = () => {
                               {runCount} {runCount === 1 ? 'run' : 'runs'}
                             </p>
                           )}
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          <div className="space-y-2">
                             {detailedStats[statsKey]!.map((stat) => {
-                              const colors = colorMap[stat.label] ?? 'bg-slate-800/60 border-slate-800/60 text-slate-500';
-                              const isTotal = stat.label === 'Total Trip';
+                              const colors = colorMap[stat.label] ?? 'bg-slate-800/60 border-slate-800/60 text-slate-400';
                               const isSingleRun = stat.best === stat.worst;
                               return (
-                                <div key={stat.label} className={`rounded-2xl border p-3 ${colors} ${isTotal ? 'col-span-2 sm:col-span-1' : ''}`}>
-                                  <p className={`text-[9px] font-black uppercase tracking-tight opacity-70 ${isTotal ? 'text-blue-100' : ''}`}>
-                                    {stat.label}
-                                  </p>
-                                  <p className="mono text-base font-black mt-1">
-                                    {formatDuration(stat.avg)}
-                                  </p>
-                                  {isSingleRun ? (
-                                    <p className="mt-1 text-[7px] font-bold uppercase opacity-30 tracking-widest leading-tight">only 1 run</p>
-                                  ) : (
-                                    <div className="mt-2 flex gap-2 text-[8px] font-bold uppercase opacity-60">
-                                      <span className="flex items-center gap-0.5"><Zap className="h-2.5 w-2.5" />{formatDuration(stat.best)}</span>
-                                      <span className="flex items-center gap-0.5"><AlertCircle className="h-2.5 w-2.5" />{formatDuration(stat.worst)}</span>
+                                <div key={stat.label} className={`rounded-2xl border px-4 py-3 ${colors}`}>
+                                  <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-2">{stat.label}</p>
+                                  <div className="flex gap-3 mt-1">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-[10px] font-bold uppercase opacity-50 mb-0.5">Avg</p>
+                                      <p className="mono text-base font-black truncate"><DurationDisplay ms={stat.avg} /></p>
                                     </div>
-                                  )}
+                                    {!isSingleRun && (
+                                      <>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-[10px] font-bold uppercase opacity-50 mb-0.5 flex items-center gap-0.5"><Zap className="h-3 w-3" />Best</p>
+                                          <p className="mono text-base font-black opacity-80 truncate"><DurationDisplay ms={stat.best} /></p>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-[10px] font-bold uppercase opacity-50 mb-0.5 flex items-center gap-0.5"><AlertCircle className="h-3 w-3" />Worst</p>
+                                          <p className="mono text-base font-black opacity-80 truncate"><DurationDisplay ms={stat.worst} /></p>
+                                        </div>
+                                      </>
+                                    )}
+                                    {isSingleRun && (
+                                      <p className="text-[7px] font-bold uppercase opacity-30 tracking-widest self-center">only 1 run</p>
+                                    )}
+                                  </div>
                                 </div>
                               );
                             })}
@@ -1050,6 +1073,101 @@ const App = () => {
                         </div>
                       )}
                     </div>
+                  </div>
+                );
+              })()}
+
+              {/* RUN TIME CHARTS */}
+              {(() => {
+                const chartRuns = history
+                  .filter(r => (r.category ?? 'normal') === statsViewCategory && r.mode === statsViewMode)
+                  .sort((a, b) => a.date.getTime() - b.date.getTime());
+                if (chartRuns.length < 2) return null;
+
+                const renderChart = (times: number[], color: string, height = 80) => {
+                  const windowSize = 5;
+                  const avg = times.map((_, i) => {
+                    const start = Math.max(0, i - windowSize + 1);
+                    const slice = times.slice(start, i + 1);
+                    return slice.reduce((a, b) => a + b, 0) / slice.length;
+                  });
+                  const minMs = Math.min(...times);
+                  const maxMs = Math.max(...times);
+                  const pad = { t: 8, r: 10, b: 8, l: 10 };
+                  const W = 360, H = height;
+                  const pw = W - pad.l - pad.r;
+                  const ph = H - pad.t - pad.b;
+                  const xScale = (i: number) => pad.l + (times.length === 1 ? pw / 2 : (i / (times.length - 1)) * pw);
+                  const yScale = (ms: number) => {
+                    const range = maxMs - minMs || 1;
+                    return pad.t + ph - ((ms - minMs) / range) * ph;
+                  };
+                  const avgLine = avg.map((v, i) => `${xScale(i)},${yScale(v)}`).join(' ');
+                  const pbIdx = times.indexOf(minMs);
+                  return (
+                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+                      {times.map((ms, i) => (
+                        <circle key={i} cx={xScale(i)} cy={yScale(ms)} r="3" fill="rgb(148 163 184)" opacity="0.55" />
+                      ))}
+                      <polyline points={avgLine} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                      <circle cx={xScale(pbIdx)} cy={yScale(minMs)} r="4" fill="rgb(250 204 21)" />
+                    </svg>
+                  );
+                };
+
+                const steps = getSteps(statsViewCategory, statsViewMode);
+                const segmentSeries = steps.slice(0, -1).map((step, idx) => {
+                  const nextStep = steps[idx + 1];
+                  const times = chartRuns
+                    .map(r => getDurationInMs(r.segments[step.id], r.segments[nextStep.id]))
+                    .filter((v): v is number => v !== null && v > 0);
+                  return { label: step.segment ?? step.label, stepId: step.id, times };
+                }).filter(s => s.times.length >= 2);
+
+                const totalTimes = chartRuns.map(r => r.totalMs);
+                const segmentColors: Record<string, string> = {
+                  'Driving': 'rgb(251 146 60)',
+                  'Walk to Stop': 'rgb(52 211 153)',
+                  'Wait for Bus': 'rgb(96 165 250)',
+                  'Bus Transit': 'rgb(167 139 250)',
+                  'Walk to Office': 'rgb(251 113 133)',
+                  'Walk to Car': 'rgb(251 113 133)',
+                  'Walk to 2nd Stop': 'rgb(52 211 153)',
+                  'Wait for 2nd Bus': 'rgb(96 165 250)',
+                  '2nd Bus Transit': 'rgb(167 139 250)',
+                  'Driving Home': 'rgb(251 146 60)',
+                };
+
+                return (
+                  <div className="rounded-3xl border border-slate-800 bg-slate-900/80 shadow-lg overflow-hidden">
+                    <button
+                      onClick={() => setShowCharts(p => !p)}
+                      className="w-full flex items-center justify-between px-4 py-4"
+                    >
+                      <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">Trends</p>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 text-[9px] font-bold text-slate-600">
+                          <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-slate-500 opacity-60"></span>Run</span>
+                          <span className="flex items-center gap-1"><span className="inline-block w-4 h-0.5 bg-emerald-600 rounded"></span>5-run avg</span>
+                          <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-yellow-500"></span>PB</span>
+                        </div>
+                        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${showCharts ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+                    {showCharts && (
+                      <div className="px-4 pb-4 space-y-4 border-t border-slate-800/60 pt-4">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400 mb-1">Total Trip</p>
+                          {renderChart(totalTimes, 'rgb(34 197 94)', 90)}
+                        </div>
+                        {segmentSeries.map(({ label, times }) => (
+                          <div key={label}>
+                            <p className="text-[10px] font-black uppercase tracking-[0.35em] mb-1" style={{ color: segmentColors[label] ?? 'rgb(148 163 184)' }}>{label}</p>
+                            {renderChart(times, segmentColors[label] ?? 'rgb(148 163 184)', 70)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -1111,7 +1229,7 @@ const App = () => {
                                 {formatFullDate(run.date)}
                               </p>
                               <div className="flex items-baseline gap-2 flex-wrap">
-                                <p className="mono text-base font-black text-slate-100">{formatDuration(run.totalMs)}</p>
+                                <p className="mono text-base font-black text-slate-100"><DurationDisplay ms={run.totalMs} /></p>
                                 <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md shrink-0 ${
                                   (run.category ?? 'normal') === 'night'
                                     ? 'text-cyan-400 bg-cyan-950'
