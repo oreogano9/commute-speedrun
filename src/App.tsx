@@ -19,7 +19,7 @@ import {
   Download,
   Upload,
   AlertTriangle,
-  ChevronUp,
+  X,
   CircleDot,
   CircleDashed,
   Flame,
@@ -229,6 +229,8 @@ const App = () => {
   const [category, setCategory] = useState<Category>('normal');
   const [mode, setMode] = useState<Mode>('forward');
   const [segments, setSegments] = useState<SegmentMap>({});
+  const [editingSegment, setEditingSegment] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState('');
   const [history, setHistory] = useState<RunRecord[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -424,18 +426,35 @@ const App = () => {
     localStorage.removeItem(inProgressKey);
   };
 
-  const undoLast = () => {
-    const lastLoggedIndex = currentSteps
-      .map((step, idx) => (segments[step.id] ? idx : -1))
-      .filter((idx) => idx >= 0)
-      .pop();
-    if (lastLoggedIndex === undefined) return;
-    const lastId = currentSteps[lastLoggedIndex].id;
+  const deleteSegment = (stepId: string) => {
     setSegments((prev) => {
       const updated = { ...prev };
-      delete updated[lastId];
+      delete updated[stepId];
       return updated;
     });
+  };
+
+  const adjustSegment = (stepId: string, deltaMs: number) => {
+    setSegments((prev) => {
+      if (!prev[stepId]) return prev;
+      return { ...prev, [stepId]: new Date(prev[stepId].getTime() + deltaMs) };
+    });
+  };
+
+  const commitEditingSegment = (stepId: string) => {
+    // Parse HH:MM:SS or MM:SS or H:MM:SS etc.
+    const parts = editingValue.trim().split(':').map(Number);
+    if (parts.some(isNaN) || parts.length < 2 || parts.length > 3) {
+      setEditingSegment(null);
+      return;
+    }
+    const [h, m, s] = parts.length === 3 ? parts : [0, ...parts];
+    const existing = segments[stepId];
+    if (!existing) { setEditingSegment(null); return; }
+    const newDate = new Date(existing);
+    newDate.setHours(h, m, Math.floor(s), (s % 1) * 1000);
+    setSegments((prev) => ({ ...prev, [stepId]: newDate }));
+    setEditingSegment(null);
   };
 
   const saveRun = async () => {
@@ -730,13 +749,6 @@ const App = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={undoLast}
-                        className="rounded-xl border border-slate-800 bg-slate-900/80 p-2 text-slate-300 hover:text-slate-100"
-                        title="Undo last split"
-                      >
-                        <ChevronUp className="h-4 w-4" />
-                      </button>
-                      <button
                         onClick={reset}
                         className="rounded-xl border border-slate-800 bg-slate-900/80 p-2 text-slate-400 hover:text-rose-500"
                         title="Reset run"
@@ -775,7 +787,26 @@ const App = () => {
                               {step.label}
                             </p>
                             {timestamp && (
-                              <p className="mono text-[10px] font-bold text-slate-400">{formatClock(timestamp)}</p>
+                              editingSegment === step.id ? (
+                                <input
+                                  autoFocus
+                                  className="mono text-[10px] font-bold text-slate-100 bg-slate-700 rounded px-1 w-20 outline-none"
+                                  value={editingValue}
+                                  onChange={(e) => setEditingValue(e.target.value)}
+                                  onBlur={() => commitEditingSegment(step.id)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') commitEditingSegment(step.id);
+                                    if (e.key === 'Escape') setEditingSegment(null);
+                                  }}
+                                />
+                              ) : (
+                                <p
+                                  className="mono text-[10px] font-bold text-slate-400 cursor-pointer hover:text-slate-200 underline decoration-dotted"
+                                  onClick={() => { setEditingSegment(step.id); setEditingValue(formatClock(timestamp)); }}
+                                >
+                                  {formatClock(timestamp)}
+                                </p>
+                              )
                             )}
                           </div>
                           <div className="text-right">
@@ -789,7 +820,28 @@ const App = () => {
                               </p>
                             )}
                           </div>
-                          {!isLogged && (
+                          {isLogged ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => adjustSegment(step.id, -30000)}
+                                className="px-2 py-1 rounded-lg text-[9px] font-black text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700"
+                              >
+                                −30s
+                              </button>
+                              <button
+                                onClick={() => adjustSegment(step.id, +30000)}
+                                className="px-2 py-1 rounded-lg text-[9px] font-black text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700"
+                              >
+                                +30s
+                              </button>
+                              <button
+                                onClick={() => deleteSegment(step.id)}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 bg-slate-800/60 hover:bg-slate-800"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               onClick={() => logTime(step.id)}
                               disabled={idx > nextStepIndex}
