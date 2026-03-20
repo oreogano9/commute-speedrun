@@ -248,7 +248,7 @@ const App = () => {
   const db = firebaseApp ? getFirestore(firebaseApp) : null;
 
   useEffect(() => {
-    const interval = setInterval(() => setLiveNow(new Date()), 300);
+    const interval = setInterval(() => setLiveNow(new Date()), 50);
     return () => clearInterval(interval);
   }, []);
 
@@ -598,8 +598,8 @@ const App = () => {
                   {category === 'night' ? 'Night% · ' : ''}{mode === 'forward' ? 'To Work' : 'To Home'}
                 </span>
                 {personalBest && (
-                  <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wide flex items-center gap-1">
-                    <Flame className="h-3 w-3" /> PB {formatDurationCompact(personalBest)}
+                  <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold tracking-wide flex items-center gap-1">
+                    <Flame className="h-3 w-3" /> PB {formatDuration(personalBest)}
                   </span>
                 )}
                 {!usingFirebase && (
@@ -909,189 +909,169 @@ const App = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.4 }}
-              className="grid gap-6 lg:grid-cols-[0.8fr,1.2fr]"
+              className="space-y-4"
             >
-              <div className="space-y-4">
-                <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-lg">
+              {/* SEGMENT PERFORMANCE BLOCK */}
+              {detailedStats && Object.keys(detailedStats).length > 0 && (() => {
+                const statsKey = makeRunKey(statsViewCategory, statsViewMode);
+                const runCount = history.filter(
+                  (h) => (h.category ?? 'normal') === statsViewCategory && h.mode === statsViewMode
+                ).length;
+                return (
+                  <div className="rounded-3xl border border-slate-800 bg-slate-900/80 shadow-lg overflow-hidden">
+                    <div className="px-4 py-3 border-b border-slate-800/60">
+                      <h2 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
+                        Segment Performance
+                      </h2>
+                    </div>
+                    {/* Compact 2×2 tab grid */}
+                    <div className="grid grid-cols-2 gap-px bg-slate-800/60 border-b border-slate-800/60">
+                      {([['normal', 'forward', 'Normal% · To Work'], ['normal', 'reverse', 'Normal% · To Home'], ['night', 'forward', 'Night% · To Work'], ['night', 'reverse', 'Night% · To Home']] as [Category, Mode, string][]).map(([cat, m, label]) => {
+                        const isActive = statsViewCategory === cat && statsViewMode === m;
+                        return (
+                          <button
+                            key={`${cat}:${m}`}
+                            onClick={() => { setStatsViewCategory(cat); setStatsViewMode(m); }}
+                            className={`px-2 py-2 text-[8px] font-black uppercase tracking-wider transition-colors ${
+                              isActive
+                                ? cat === 'night'
+                                  ? 'bg-slate-800 text-cyan-300'
+                                  : 'bg-slate-700 text-white'
+                                : 'bg-slate-900/80 text-slate-500 hover:text-slate-300'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="p-4">
+                      {detailedStats[statsKey] && detailedStats[statsKey]!.length > 0 ? (
+                        <>
+                          {runCount > 0 && (
+                            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 text-right mb-3">
+                              {runCount} {runCount === 1 ? 'run' : 'runs'}
+                            </p>
+                          )}
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {detailedStats[statsKey]!.map((stat) => {
+                              const colors = colorMap[stat.label] ?? 'bg-slate-800/60 border-slate-800/60 text-slate-500';
+                              const isTotal = stat.label === 'Total Trip';
+                              const isSingleRun = stat.best === stat.worst;
+                              return (
+                                <div key={stat.label} className={`rounded-2xl border p-3 ${colors} ${isTotal ? 'col-span-2 sm:col-span-1' : ''}`}>
+                                  <p className={`text-[9px] font-black uppercase tracking-tight opacity-70 ${isTotal ? 'text-blue-100' : ''}`}>
+                                    {stat.label}
+                                  </p>
+                                  <p className="mono text-base font-black mt-1">
+                                    {formatDuration(stat.avg)}
+                                  </p>
+                                  {isSingleRun ? (
+                                    <p className="mt-1 text-[7px] font-bold uppercase opacity-30 tracking-widest leading-tight">only 1 run</p>
+                                  ) : (
+                                    <div className="mt-2 flex gap-2 text-[8px] font-bold uppercase opacity-60">
+                                      <span className="flex items-center gap-0.5"><Zap className="h-2.5 w-2.5" />{formatDuration(stat.best)}</span>
+                                      <span className="flex items-center gap-0.5"><AlertCircle className="h-2.5 w-2.5" />{formatDuration(stat.worst)}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-center py-6">
+                          <AlertTriangle className="mx-auto h-8 w-8 text-slate-500" />
+                          <p className="mt-2 text-[10px] font-bold uppercase text-slate-500">
+                            No {statsViewCategory === 'night' ? 'Night% ' : ''}{statsViewMode === 'forward' ? 'To Work' : 'To Home'} data yet
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* RUN LOG */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between px-1">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">Run Log</h3>
                   <div className="flex gap-2">
                     <button
                       onClick={exportHistory}
-                      className="flex-1 rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-[10px] font-black uppercase tracking-widest text-slate-500"
+                      className="flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors"
                     >
-                      <Download className="h-4 w-4 inline mr-2" /> Export
+                      <Download className="h-3 w-3" /> Export
                     </button>
                     <button
                       onClick={handleImportClick}
                       disabled={isImporting}
-                      className="flex-1 rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-[10px] font-black uppercase tracking-widest text-slate-500 disabled:opacity-60"
+                      className="flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-60"
                     >
-                      <Upload className="h-4 w-4 inline mr-2" /> Import
+                      <Upload className="h-3 w-3" /> Import
                     </button>
                     <input type="file" ref={fileInputRef} onChange={importHistory} accept=".json" className="hidden" />
                   </div>
                 </div>
-
-                {detailedStats && Object.keys(detailedStats).length > 0 && (() => {
-                  const statsKey = makeRunKey(statsViewCategory, statsViewMode);
-                  return (
-                    <div className="rounded-3xl border border-slate-800 bg-slate-900/80 shadow-lg overflow-hidden">
-                      <div className="flex items-center justify-between bg-slate-800/60/60 px-4 py-3">
-                        <h2 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
-                          Segment Performance
-                        </h2>
-                      </div>
-                      <div className="px-4 pt-3 pb-1 flex flex-col gap-2">
-                        {/* Category tabs */}
-                        <div className="flex gap-1 rounded-lg border border-slate-800/60 bg-slate-900/80 p-1 shadow-sm">
-                          <button
-                            onClick={() => setStatsViewCategory('normal')}
-                            className={`flex-1 rounded-md px-2 py-1 text-[9px] font-black uppercase transition-all ${
-                              statsViewCategory === 'normal'
-                                ? 'bg-slate-700 text-white'
-                                : 'text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            Normal%
-                          </button>
-                          <button
-                            onClick={() => setStatsViewCategory('night')}
-                            className={`flex-1 rounded-md px-2 py-1 text-[9px] font-black uppercase transition-all ${
-                              statsViewCategory === 'night'
-                                ? 'bg-slate-800 text-cyan-300 border border-cyan-500/30'
-                                : 'text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            Night%
-                          </button>
-                        </div>
-                        {/* Mode tabs */}
-                        <div className="flex gap-1 rounded-lg border border-slate-800/60 bg-slate-900/80 p-1 shadow-sm">
-                          <button
-                            onClick={() => setStatsViewMode('forward')}
-                            className={`flex-1 rounded-md px-2 py-1 text-[9px] font-black uppercase ${
-                              statsViewMode === 'forward'
-                                ? 'bg-blue-600 text-white'
-                                : 'text-slate-400'
-                            }`}
-                          >
-                            To Work
-                          </button>
-                          <button
-                            onClick={() => setStatsViewMode('reverse')}
-                            className={`flex-1 rounded-md px-2 py-1 text-[9px] font-black uppercase ${
-                              statsViewMode === 'reverse'
-                                ? 'bg-indigo-600 text-white'
-                                : 'text-slate-400'
-                            }`}
-                          >
-                            To Home
-                          </button>
-                        </div>
-                      </div>
-                      <div className="space-y-3 p-4">
-                        {detailedStats[statsKey] && detailedStats[statsKey]!.length > 0 ? (
-                          detailedStats[statsKey]!.map((stat) => {
-                            const colors = colorMap[stat.label] ?? 'bg-slate-800/60 border-slate-800/60 text-slate-500';
-                            const isTotal = stat.label === 'Total Trip';
-                            return (
-                              <div key={stat.label} className={`rounded-2xl border p-3 ${colors}`}>
-                                <div className="flex items-center justify-between">
-                                  <span className={`text-xs font-black uppercase tracking-tight ${isTotal ? 'text-blue-100' : ''}`}>
-                                    {stat.label}
-                                  </span>
-                                  <span className="mono text-[10px] font-bold opacity-70">Avg: {formatDuration(stat.avg)}</span>
-                                </div>
-                                <div className="mt-3 grid grid-cols-2 gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <Zap className={isTotal ? 'text-blue-300 h-4 w-4' : 'text-emerald-500 h-4 w-4'} />
-                                    <div>
-                                      <p className="text-[8px] font-black uppercase opacity-60">Best</p>
-                                      <p className="mono text-xs font-black">{formatDuration(stat.best)}</p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <AlertCircle className={isTotal ? 'text-blue-200 h-4 w-4' : 'text-amber-500 h-4 w-4'} />
-                                    <div>
-                                      <p className="text-[8px] font-black uppercase opacity-60">Worst</p>
-                                      <p className="mono text-xs font-black">{formatDuration(stat.worst)}</p>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <div className="text-center py-6">
-                            <AlertTriangle className="mx-auto h-8 w-8 text-slate-500" />
-                            <p className="mt-2 text-[10px] font-bold uppercase text-slate-500">
-                              No {statsViewCategory === 'night' ? 'Night% ' : ''}{statsViewMode === 'forward' ? 'To Work' : 'To Home'} data yet
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              <div className="space-y-3">
-                <h3 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400 px-1">Run Log</h3>
-                {history.length === 0 && (
+                {history.length === 0 ? (
                   <div className="rounded-2xl border border-slate-800 border-dashed bg-slate-900/40 p-10 flex flex-col items-center gap-3 text-center">
                     <Rabbit className="h-8 w-8 text-slate-600" />
                     <p className="text-xs font-black uppercase tracking-widest text-slate-500">No runs yet</p>
                     <p className="text-[10px] text-slate-600 max-w-[18ch]">Head back to the timer and log your first split</p>
                   </div>
-                )}
-                {[...history]
-                  .sort((a, b) => b.date.getTime() - a.date.getTime())
-                  .map((run) => (
-                    <div
-                      key={run.id}
-                      className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-sm transition-all hover:border-blue-100"
-                    >
-                      <div className="flex items-center gap-4">
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {[...history]
+                      .sort((a, b) => b.date.getTime() - a.date.getTime())
+                      .map((run) => (
                         <div
-                          className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                            (run.category ?? 'normal') === 'night'
-                              ? 'bg-cyan-950 text-cyan-400 border border-cyan-800/40'
-                              : run.mode === 'forward'
-                                ? 'bg-blue-950 text-blue-400'
-                                : 'bg-indigo-950 text-indigo-400'
-                          }`}
+                          key={run.id}
+                          className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-sm transition-all hover:border-slate-700"
                         >
-                          {(run.category ?? 'normal') === 'night'
-                            ? <Moon size={18} />
-                            : run.mode === 'forward'
-                              ? <Building2 size={18} />
-                              : <Home size={18} />}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-[10px] font-bold uppercase tracking-tight text-slate-500">
-                            {formatFullDate(run.date)}
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <p className="mono text-lg font-black text-slate-100">{formatDuration(run.totalMs)}</p>
-                            <span className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md ${
-                              (run.category ?? 'normal') === 'night'
-                                ? 'text-cyan-400 bg-cyan-950'
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                                (run.category ?? 'normal') === 'night'
+                                  ? 'bg-cyan-950 text-cyan-400 border border-cyan-800/40'
+                                  : run.mode === 'forward'
+                                    ? 'bg-blue-950 text-blue-400'
+                                    : 'bg-indigo-950 text-indigo-400'
+                              }`}
+                            >
+                              {(run.category ?? 'normal') === 'night'
+                                ? <Moon size={16} />
                                 : run.mode === 'forward'
-                                  ? 'text-blue-400 bg-blue-950'
-                                  : 'text-indigo-400 bg-indigo-950'
-                            }`}>
-                              {(run.category ?? 'normal') === 'night' ? 'Night%' : 'Normal%'} · {run.mode === 'forward' ? 'To Work' : 'To Home'}
-                            </span>
+                                  ? <Building2 size={16} />
+                                  : <Home size={16} />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[9px] font-bold uppercase tracking-tight text-slate-500">
+                                {formatFullDate(run.date)}
+                              </p>
+                              <div className="flex items-baseline gap-2 flex-wrap">
+                                <p className="mono text-base font-black text-slate-100">{formatDuration(run.totalMs)}</p>
+                                <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md shrink-0 ${
+                                  (run.category ?? 'normal') === 'night'
+                                    ? 'text-cyan-400 bg-cyan-950'
+                                    : run.mode === 'forward'
+                                      ? 'text-blue-400 bg-blue-950'
+                                      : 'text-indigo-400 bg-indigo-950'
+                                }`}>
+                                  {(run.category ?? 'normal') === 'night' ? 'Night%' : 'Normal%'} · {run.mode === 'forward' ? 'To Work' : 'To Home'}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => deleteRun(run.id)}
+                              className="shrink-0 rounded-xl p-2 text-slate-600 transition-colors hover:text-rose-400"
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </div>
                         </div>
-                        <button
-                          onClick={() => deleteRun(run.id)}
-                          className="rounded-xl p-2 text-slate-400 transition-colors hover:text-rose-400"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                      ))}
+                  </div>
+                )}
               </div>
             </motion.section>
           )}
