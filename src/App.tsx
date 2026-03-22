@@ -67,6 +67,12 @@ type Step = {
   icon: React.ReactElement;
 };
 
+type SegmentPrediction = {
+  label: string;
+  avgMs: number;
+  sampleCount: number;
+};
+
 const firebaseConfigEnv = import.meta.env.VITE_FIREBASE_CONFIG as string | undefined;
 const appId = (import.meta.env.VITE_FIREBASE_APP_ID as string | undefined) ?? 'commute-speedrun';
 const usingFirebase = Boolean(firebaseConfigEnv && firebaseConfigEnv.trim().length > 0);
@@ -174,6 +180,13 @@ const formatFullDate = (date: Date) =>
     weekday: 'short',
     month: 'short',
     day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date);
+
+const formatArrivalTime = (date: Date) =>
+  new Intl.DateTimeFormat('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false
@@ -430,6 +443,91 @@ const App = () => {
     return gold;
   }, [history, mode, category, currentSteps]);
 
+  const averageSplits = useMemo(() => {
+    const relevantRuns = history.filter(
+      (run) => (run.category ?? 'normal') === category && run.mode === mode
+    );
+    const averages: Record<string, SegmentPrediction> = {};
+
+    currentSteps.slice(0, -1).forEach((step, idx) => {
+      const nextStep = currentSteps[idx + 1];
+      const durations = relevantRuns
+        .map((run) => getDurationInMs(run.segments[step.id], run.segments[nextStep.id]))
+        .filter((value): value is number => value !== null);
+
+      if (!durations.length) return;
+
+      averages[step.id] = {
+        label: step.segment ?? step.label,
+        avgMs: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
+        sampleCount: durations.length
+      };
+    });
+
+    return averages;
+  }, [history, category, mode, currentSteps]);
+
+  const livePrediction = useMemo(() => {
+    if (!Object.keys(segments).length) return null;
+
+    const firstLoggedStep = currentSteps.find((step) => segments[step.id]);
+    if (!firstLoggedStep) return null;
+
+    let remainingMs = 0;
+    let contributingSegments = 0;
+    let sampleFloor: number | null = null;
+    const missingSegments: string[] = [];
+
+    currentSteps.slice(0, -1).forEach((step, idx) => {
+      const nextStep = currentSteps[idx + 1];
+      const start = segments[step.id];
+      const end = segments[nextStep.id];
+      const prediction = averageSplits[step.id];
+
+      if (!start) return;
+
+      if (end) {
+        return;
+      }
+
+      if (!prediction) {
+        missingSegments.push(step.segment ?? step.label);
+        return;
+      }
+
+      const elapsedMs = getDurationInMs(start, liveNow) ?? 0;
+      const estimatedRemainingForSegment = Math.max(0, prediction.avgMs - elapsedMs);
+      remainingMs += estimatedRemainingForSegment;
+      contributingSegments += 1;
+      sampleFloor = sampleFloor === null ? prediction.sampleCount : Math.min(sampleFloor, prediction.sampleCount);
+
+      for (let futureIdx = idx + 1; futureIdx < currentSteps.length - 1; futureIdx += 1) {
+        const futureStep = currentSteps[futureIdx];
+        const futurePrediction = averageSplits[futureStep.id];
+        if (!futurePrediction) {
+          missingSegments.push(futureStep.segment ?? futureStep.label);
+          continue;
+        }
+        remainingMs += futurePrediction.avgMs;
+        contributingSegments += 1;
+        sampleFloor = sampleFloor === null
+          ? futurePrediction.sampleCount
+          : Math.min(sampleFloor, futurePrediction.sampleCount);
+      }
+    });
+
+    if (contributingSegments === 0) return null;
+
+    const eta = new Date(liveNow.getTime() + remainingMs);
+    return {
+      eta,
+      remainingMs,
+      contributingSegments,
+      sampleFloor,
+      missingSegments
+    };
+  }, [segments, currentSteps, averageSplits, liveNow]);
+
   const logTime = (stepId: string) => {
     setSegments((prev) => ({ ...prev, [stepId]: new Date() }));
   };
@@ -678,6 +776,41 @@ const App = () => {
                         width: `${(Object.keys(segments).length / currentSteps.length) * 100}%`
                       }}
                     />
+                  </div>
+                )}
+                {livePrediction && (
+                  <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-200/80">
+                          Predicted Arrival
+                        </p>
+                        <p className="mono text-2xl font-bold text-cyan-300">
+                          {formatArrivalTime(livePrediction.eta)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-200/80">
+                          Remaining
+                        </p>
+                        <p className="mono text-sm font-bold text-slate-100">
+                          <DurationDisplay ms={livePrediction.remainingMs} />
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                      <span>
+                        Based on {livePrediction.contributingSegments} avg split{livePrediction.contributingSegments === 1 ? '' : 's'}
+                      </span>
+                      <span>
+                        {livePrediction.sampleFloor ? `${livePrediction.sampleFloor} run sample` : 'No sample'}
+                      </span>
+                    </div>
+                    {livePrediction.missingSegments.length > 0 && (
+                      <p className="mt-2 text-[10px] text-amber-300">
+                        Missing history for: {livePrediction.missingSegments.join(', ')}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
