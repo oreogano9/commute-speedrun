@@ -778,41 +778,6 @@ const App = () => {
                     />
                   </div>
                 )}
-                {livePrediction && (
-                  <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-200/80">
-                          Predicted Arrival
-                        </p>
-                        <p className="mono text-2xl font-bold text-cyan-300">
-                          {formatArrivalTime(livePrediction.eta)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-200/80">
-                          Remaining
-                        </p>
-                        <p className="mono text-sm font-bold text-slate-100">
-                          <DurationDisplay ms={livePrediction.remainingMs} />
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                      <span>
-                        Based on {livePrediction.contributingSegments} avg split{livePrediction.contributingSegments === 1 ? '' : 's'}
-                      </span>
-                      <span>
-                        {livePrediction.sampleFloor ? `${livePrediction.sampleFloor} run sample` : 'No sample'}
-                      </span>
-                    </div>
-                    {livePrediction.missingSegments.length > 0 && (
-                      <p className="mt-2 text-[10px] text-amber-300">
-                        Missing history for: {livePrediction.missingSegments.join(', ')}
-                      </p>
-                    )}
-                  </div>
-                )}
               </div>
               {/* Category tabs */}
               <div className="flex gap-1 rounded-2xl border border-slate-800 bg-slate-900/80 p-1">
@@ -1394,36 +1359,52 @@ const App = () => {
       {/* Floating split button */}
       <AnimatePresence>
         {!showHistory && (
-          <motion.button
+          <motion.div
             key="fab"
             initial={{ opacity: 0, scale: 0.8, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: 20 }}
             transition={{ duration: 0.2 }}
-            disabled={isFinished && isSaving}
-            onClick={() => {
-              if (isFinished) {
-                saveRun();
-              } else {
-                const nextStep = currentSteps[nextStepIndex === -1 ? 0 : nextStepIndex];
-                if (nextStep) logTime(nextStep.id);
-              }
-            }}
-            className={`fixed bottom-6 right-6 z-50 flex flex-col items-center justify-center rounded-2xl shadow-2xl px-5 py-3 text-white active:scale-95 transition-transform disabled:opacity-60 ${
-              isFinished ? 'bg-emerald-600' : 'bg-blue-600'
-            }`}
+            className="fixed bottom-6 right-6 z-50 flex items-stretch"
           >
-            <span className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70">
-              {isFinished
-                ? isSaving ? 'Saving...' : 'Run complete'
-                : Object.keys(segments).length === 0
-                  ? 'Tap to begin'
-                  : currentSteps[nextStepIndex]?.label}
-            </span>
-            <span className="text-base font-black uppercase tracking-widest">
-              {isFinished ? 'Save Run' : Object.keys(segments).length === 0 ? 'Start' : 'Split'}
-            </span>
-          </motion.button>
+            {livePrediction && !isFinished && (
+              <div className="flex items-center rounded-l-2xl border border-r-0 border-slate-700 bg-slate-800/95 px-3 text-slate-200 shadow-2xl">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  ETA:
+                </span>
+                <span className="mono ml-2 text-sm font-bold text-slate-100">
+                  {formatArrivalTime(livePrediction.eta)}
+                </span>
+              </div>
+            )}
+            <button
+              disabled={isFinished && isSaving}
+              onClick={() => {
+                if (isFinished) {
+                  saveRun();
+                } else {
+                  const nextStep = currentSteps[nextStepIndex === -1 ? 0 : nextStepIndex];
+                  if (nextStep) logTime(nextStep.id);
+                }
+              }}
+              className={`flex flex-col items-center justify-center rounded-2xl px-5 py-3 text-white shadow-2xl active:scale-95 transition-transform disabled:opacity-60 ${
+                livePrediction && !isFinished ? 'rounded-l-none' : ''
+              } ${
+                isFinished ? 'bg-emerald-600' : 'bg-blue-600'
+              }`}
+            >
+              <span className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70">
+                {isFinished
+                  ? isSaving ? 'Saving...' : 'Run complete'
+                  : Object.keys(segments).length === 0
+                    ? 'Tap to begin'
+                    : currentSteps[nextStepIndex]?.label}
+              </span>
+              <span className="text-base font-black uppercase tracking-widest">
+                {isFinished ? 'Save Run' : Object.keys(segments).length === 0 ? 'Start' : 'Split'}
+              </span>
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
