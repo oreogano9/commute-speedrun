@@ -136,6 +136,12 @@ const getDurationInMs = (start?: Date, end?: Date) => {
   return Math.max(0, end.getTime() - start.getTime());
 };
 
+const getDisplayedSegmentName = (steps: Step[], index: number) => {
+  const step = steps[index];
+  if (!step) return '';
+  return step.segment ?? step.label;
+};
+
 const formatDuration = (ms?: number | null) => {
   if (ms === null || ms === undefined || Number.isNaN(ms)) return '--';
   const totalSeconds = Math.floor(ms / 1000);
@@ -898,9 +904,14 @@ const App = () => {
                               {React.cloneElement(step.icon, { size: 18 })}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className={`text-sm font-bold ${isLogged ? 'text-slate-400' : 'text-slate-100'}`}>
-                                {step.label}
+                              <p className={`text-sm font-bold ${isLogged ? 'text-slate-300' : 'text-slate-100'}`}>
+                                {getDisplayedSegmentName(currentSteps, idx)}
                               </p>
+                              {step.segment && (
+                                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                  Split at {step.label}
+                                </p>
+                              )}
                               {timestamp && (
                                 editingSegment === step.id ? (
                                   <input
@@ -1398,7 +1409,7 @@ const App = () => {
                   ? isSaving ? 'Saving...' : 'Run complete'
                   : Object.keys(segments).length === 0
                     ? 'Tap to begin'
-                    : currentSteps[nextStepIndex]?.label}
+                  : getDisplayedSegmentName(currentSteps, nextStepIndex)}
               </span>
               <span className="text-base font-black uppercase tracking-widest">
                 {isFinished ? 'Save Run' : Object.keys(segments).length === 0 ? 'Start' : 'Split'}
