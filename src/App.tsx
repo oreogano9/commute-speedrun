@@ -22,7 +22,6 @@ import {
   X,
   ChevronDown,
   Flame,
-  Moon,
   Rabbit
 } from 'lucide-react';
 import {
@@ -45,15 +44,11 @@ import {
 } from 'firebase/firestore';
 
 type Mode = 'forward' | 'reverse';
-type Category = 'normal' | 'night';
-type RunKey = `${Category}:${Mode}`;
 type SegmentMap = Record<string, Date>;
-
-const makeRunKey = (cat: Category, m: Mode): RunKey => `${cat}:${m}`;
 
 type RunRecord = {
   id: string;
-  category: Category;
+  category?: string;
   mode: Mode;
   totalMs: number;
   date: Date;
@@ -109,22 +104,12 @@ const reverseSteps: Step[] = [
   { id: 'car', label: 'Got Home', icon: <Home /> }
 ];
 
-const nightForwardSteps: Step[] = [
-  { id: 'car', label: 'Got in Car', icon: <Car />, segment: 'Driving' },
-  { id: 'parking', label: 'Arrived at Parking', icon: <ParkingCircle />, segment: 'Walk to Stop' },
-  { id: 'busStop', label: 'At Bus Stop', icon: <Clock />, segment: 'Wait for Bus' },
-  { id: 'busArrival', label: 'Bus Arrived', icon: <Bus />, segment: 'Bus Transit' },
-  { id: 'busDest', label: 'Bus Destination', icon: <Timer />, segment: 'Walk to 2nd Stop' },
-  { id: 'busStop2', label: 'At 2nd Bus Stop', icon: <Clock />, segment: 'Wait for 2nd Bus' },
-  { id: 'busArrival2', label: '2nd Bus Arrived', icon: <Bus />, segment: '2nd Bus Transit' },
-  { id: 'checkpoint', label: 'At Checkpoint', icon: <Flag /> }
-];
+const getSteps = (m: Mode) => (m === 'forward' ? forwardSteps : reverseSteps);
 
-const nightReverseSteps: Step[] = reverseSteps;
-
-const getSteps = (cat: Category, m: Mode): Step[] => {
-  if (cat === 'night') return m === 'forward' ? nightForwardSteps : nightReverseSteps;
-  return m === 'forward' ? forwardSteps : reverseSteps;
+const supportedStepIds = new Set([...forwardSteps, ...reverseSteps].map((step) => step.id));
+const canonicalSegmentIndexByMode: Record<Mode, number[]> = {
+  forward: [0, 1, 2, 3, 4],
+  reverse: [4, 2, 3, 1, 0]
 };
 
 const storageKey = 'csr_runs_v1';
@@ -140,6 +125,38 @@ const getDisplayedSegmentName = (steps: Step[], index: number) => {
   const step = steps[index];
   if (!step) return '';
   return step.segment ?? step.label;
+};
+
+const getMinutesIntoDay = (date: Date) => date.getHours() * 60 + date.getMinutes();
+
+const getCircularMinuteDistance = (a: number, b: number) => {
+  const diff = Math.abs(a - b);
+  return Math.min(diff, 1440 - diff);
+};
+
+const getRunStartTime = (run: RunRecord) => {
+  const steps = getSteps(run.mode);
+  return run.segments[steps[0].id] ?? run.date;
+};
+
+const isNightRun = (run: Pick<RunRecord, 'category'>) => run.category === 'night';
+
+const getAlignedDurations = (run: RunRecord, targetMode: Mode): Array<number | null> | null => {
+  if (isNightRun(run)) return null;
+
+  const runSteps = getSteps(run.mode);
+  const runSlots = canonicalSegmentIndexByMode[run.mode];
+  const targetSlots = canonicalSegmentIndexByMode[targetMode];
+  const byCanonicalSlot: Array<number | null> = new Array(runSlots.length).fill(null);
+
+  runSteps.slice(0, -1).forEach((step, index) => {
+    const duration = getDurationInMs(run.segments[step.id], run.segments[runSteps[index + 1].id]);
+    if (duration === null) return;
+    byCanonicalSlot[runSlots[index]] = duration;
+  });
+
+  if (byCanonicalSlot.some((duration) => duration === null)) return null;
+  return targetSlots.map((slot) => byCanonicalSlot[slot]);
 };
 
 const formatDuration = (ms?: number | null) => {
@@ -222,9 +239,10 @@ const loadLocalRuns = (): RunRecord[] => {
       category?: string;
       segments: Record<string, string>;
     }>;
-    return parsed.map((run) => ({
+    return parsed
+      .filter((run) => run.category !== 'night')
+      .map((run) => ({
       ...run,
-      category: (run.category ?? 'normal') as Category,
       date: new Date(run.date),
       segments: Object.fromEntries(
         Object.entries(run.segments).map(([key, value]) => [key, new Date(value)])
@@ -259,7 +277,6 @@ const App = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [category, setCategory] = useState<Category>('normal');
   const [mode, setMode] = useState<Mode>('forward');
   const [segments, setSegments] = useState<SegmentMap>({});
   const [editingSegment, setEditingSegment] = useState<string | null>(null);
@@ -270,9 +287,9 @@ const App = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [statsViewCategory, setStatsViewCategory] = useState<Category>('normal');
   const [statsViewMode, setStatsViewMode] = useState<Mode>('forward');
   const [liveNow, setLiveNow] = useState<Date>(new Date());
+  const timeOfDayMinutes = useMemo(() => getMinutesIntoDay(liveNow), [liveNow]);
 
   const firebaseApp = useMemo<FirebaseApp | null>(() => {
     if (!usingFirebase || !firebaseConfigEnv) return null;
@@ -293,9 +310,13 @@ const App = () => {
     const raw = localStorage.getItem(inProgressKey);
     if (!raw) return;
     try {
-      const parsed = JSON.parse(raw) as { category?: string; mode: Mode; segments: Record<string, string> };
+      const parsed = JSON.parse(raw) as { mode: Mode; segments: Record<string, string> };
       if (parsed?.segments && Object.keys(parsed.segments).length > 0) {
-        setCategory((parsed.category ?? 'normal') as Category);
+        const hasUnsupportedSteps = Object.keys(parsed.segments).some((stepId) => !supportedStepIds.has(stepId));
+        if (hasUnsupportedSteps) {
+          localStorage.removeItem(inProgressKey);
+          return;
+        }
         setMode(parsed.mode);
         setSegments(
           Object.fromEntries(
@@ -336,9 +357,8 @@ const App = () => {
           ...(snap.data() as Omit<RunRecord, 'id' | 'date' | 'segments'> & {
             date?: unknown;
             segments?: Record<string, unknown>;
-            category?: string;
           }),
-          category: ((snap.data().category ?? 'normal') as Category),
+          category: snap.data().category as string | undefined,
           date: parseDate(snap.data().date),
           segments: Object.fromEntries(
             Object.entries(snap.data().segments ?? {}).map(([key, value]) => [
@@ -347,14 +367,14 @@ const App = () => {
             ])
           )
         }));
-        setHistory(docs as RunRecord[]);
+        setHistory((docs as RunRecord[]).filter((run) => !isNightRun(run)));
       },
       () => undefined
     );
     return () => unsubscribe();
   }, [db, userId]);
 
-  const currentSteps = getSteps(category, mode);
+  const currentSteps = getSteps(mode);
   const nextStepIndex = currentSteps.findIndex((step) => !segments[step.id]);
   const isFinished = nextStepIndex === -1 && Object.keys(segments).length > 0;
 
@@ -371,75 +391,80 @@ const App = () => {
       return;
     }
     const serialized = {
-      category,
       mode,
       segments: Object.fromEntries(
         Object.entries(segments).map(([key, value]) => [key, value.toISOString()])
       )
     };
     localStorage.setItem(inProgressKey, JSON.stringify(serialized));
-  }, [segments, mode, category, isFinished]);
+  }, [segments, mode, isFinished]);
+
+  const comparableRunsByMode = useMemo(() => {
+    const result: Record<Mode, Array<{ run: RunRecord; durations: Array<number | null> }>> = {
+      forward: [],
+      reverse: []
+    };
+
+    history.forEach((run) => {
+      if (isNightRun(run)) return;
+      (['forward', 'reverse'] as Mode[]).forEach((targetMode) => {
+        const durations = getAlignedDurations(run, targetMode);
+        if (!durations) return;
+        result[targetMode].push({ run, durations });
+      });
+    });
+
+    return result;
+  }, [history]);
 
   const detailedStats = useMemo(() => {
-    if (history.length === 0) return null;
-    const allKeys: RunKey[] = ['normal:forward', 'normal:reverse', 'night:forward', 'night:reverse'];
-    const results: Partial<Record<RunKey, { label: string; avg: number; best: number; worst: number }[]>> = {};
+    const results: Partial<Record<Mode, { label: string; avg: number; best: number; worst: number }[]>> = {};
 
-    allKeys.forEach((key) => {
-      const [cat, m] = key.split(':') as [Category, Mode];
-      const steps = getSteps(cat, m);
-      const keyedRuns = history.filter(
-        (h) => (h.category ?? 'normal') === cat && h.mode === m
-      );
-      if (!keyedRuns.length) return;
+    (['forward', 'reverse'] as Mode[]).forEach((targetMode) => {
+      const comparableRuns = comparableRunsByMode[targetMode];
+      if (!comparableRuns.length) return;
 
-      const segmentDurations: Record<string, number[]> = {};
-      keyedRuns.forEach((run) => {
-        for (let i = 0; i < steps.length - 1; i += 1) {
-          const label = steps[i].segment ?? steps[i].label;
-          const start = run.segments[steps[i].id];
-          const end = run.segments[steps[i + 1].id];
-          const dur = getDurationInMs(start, end);
-          if (dur !== null) {
-            if (!segmentDurations[label]) segmentDurations[label] = [];
-            segmentDurations[label].push(dur);
-          }
-        }
-        if (!segmentDurations['Total Trip']) segmentDurations['Total Trip'] = [];
-        segmentDurations['Total Trip'].push(run.totalMs);
-      });
+      const steps = getSteps(targetMode);
+      const stats = steps.slice(0, -1).map((step, index) => {
+        const durations = comparableRuns
+          .map(({ durations: alignedDurations }) => alignedDurations[index])
+          .filter((value): value is number => value !== null);
+        if (!durations.length) return null;
+        return {
+          label: step.segment ?? step.label,
+          avg: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
+          best: Math.min(...durations),
+          worst: Math.max(...durations)
+        };
+      }).filter((value): value is { label: string; avg: number; best: number; worst: number } => value !== null);
 
-      results[key] = Object.entries(segmentDurations).map(([label, durs]) => ({
-        label,
-        avg: Math.round(durs.reduce((a, b) => a + b, 0) / durs.length),
-        best: Math.min(...durs),
-        worst: Math.max(...durs)
-      }));
+      const totalDurations = comparableRuns.map(({ run }) => run.totalMs);
+      if (totalDurations.length) {
+        stats.push({
+          label: 'Total Trip',
+          avg: Math.round(totalDurations.reduce((sum, value) => sum + value, 0) / totalDurations.length),
+          best: Math.min(...totalDurations),
+          worst: Math.max(...totalDurations)
+        });
+      }
+
+      results[targetMode] = stats;
     });
 
     return results;
-  }, [history]);
+  }, [comparableRunsByMode]);
 
   const personalBest = useMemo(() => {
-    const modeRuns = history.filter(
-      (run) => (run.category ?? 'normal') === category && run.mode === mode
-    );
+    const modeRuns = history.filter((run) => !isNightRun(run) && run.mode === mode);
     if (!modeRuns.length) return null;
     return Math.min(...modeRuns.map((run) => run.totalMs));
-  }, [history, mode, category]);
+  }, [history, mode]);
 
   const goldSplits = useMemo(() => {
-    const modeRuns = history.filter(
-      (run) => (run.category ?? 'normal') === category && run.mode === mode
-    );
-    const steps = currentSteps;
     const gold: Record<string, number> = {};
-    modeRuns.forEach((run) => {
-      steps.forEach((step, idx) => {
-        if (idx === steps.length - 1) return;
-        const start = run.segments[step.id];
-        const end = run.segments[steps[idx + 1].id];
-        const duration = getDurationInMs(start, end);
+    comparableRunsByMode[mode].forEach(({ durations }) => {
+      currentSteps.slice(0, -1).forEach((step, idx) => {
+        const duration = durations[idx];
         if (duration === null) return;
         if (!gold[step.id] || duration < gold[step.id]) {
           gold[step.id] = duration;
@@ -447,80 +472,84 @@ const App = () => {
       });
     });
     return gold;
-  }, [history, mode, category, currentSteps]);
+  }, [comparableRunsByMode, mode, currentSteps]);
 
   const averageSplits = useMemo(() => {
-    const relevantRuns = history.filter(
-      (run) => (run.category ?? 'normal') === category && run.mode === mode
-    );
     const averages: Record<string, SegmentPrediction> = {};
 
     currentSteps.slice(0, -1).forEach((step, idx) => {
-      const nextStep = currentSteps[idx + 1];
-      const durations = relevantRuns
-        .map((run) => getDurationInMs(run.segments[step.id], run.segments[nextStep.id]))
-        .filter((value): value is number => value !== null);
+      let weightedSum = 0;
+      let weightTotal = 0;
+      let sampleCount = 0;
 
-      if (!durations.length) return;
+      comparableRunsByMode[mode].forEach(({ run, durations }) => {
+        const duration = durations[idx];
+        if (duration === null) return;
+        const timeWeight = 1 / (1 + getCircularMinuteDistance(getMinutesIntoDay(getRunStartTime(run)), timeOfDayMinutes) / 45);
+        weightedSum += duration * timeWeight;
+        weightTotal += timeWeight;
+        sampleCount += 1;
+      });
+
+      if (!weightTotal || !sampleCount) return;
 
       averages[step.id] = {
         label: step.segment ?? step.label,
-        avgMs: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
-        sampleCount: durations.length
+        avgMs: Math.round(weightedSum / weightTotal),
+        sampleCount
       };
     });
 
     return averages;
-  }, [history, category, mode, currentSteps]);
+  }, [comparableRunsByMode, currentSteps, mode, timeOfDayMinutes]);
 
   const livePrediction = useMemo(() => {
-    if (!Object.keys(segments).length) return null;
-
-    const firstLoggedStep = currentSteps.find((step) => segments[step.id]);
-    if (!firstLoggedStep) return null;
+    const hasStarted = Object.keys(segments).length > 0;
 
     let remainingMs = 0;
     let contributingSegments = 0;
     let sampleFloor: number | null = null;
-    const missingSegments: string[] = [];
-
-    currentSteps.slice(0, -1).forEach((step, idx) => {
-      const nextStep = currentSteps[idx + 1];
-      const start = segments[step.id];
-      const end = segments[nextStep.id];
-      const prediction = averageSplits[step.id];
-
-      if (!start) return;
-
-      if (end) {
-        return;
-      }
-
-      if (!prediction) {
-        missingSegments.push(step.segment ?? step.label);
-        return;
-      }
-
-      const elapsedMs = getDurationInMs(start, liveNow) ?? 0;
-      const estimatedRemainingForSegment = Math.max(0, prediction.avgMs - elapsedMs);
-      remainingMs += estimatedRemainingForSegment;
-      contributingSegments += 1;
-      sampleFloor = sampleFloor === null ? prediction.sampleCount : Math.min(sampleFloor, prediction.sampleCount);
-
-      for (let futureIdx = idx + 1; futureIdx < currentSteps.length - 1; futureIdx += 1) {
-        const futureStep = currentSteps[futureIdx];
-        const futurePrediction = averageSplits[futureStep.id];
-        if (!futurePrediction) {
-          missingSegments.push(futureStep.segment ?? futureStep.label);
-          continue;
-        }
-        remainingMs += futurePrediction.avgMs;
+    
+    if (!hasStarted) {
+      for (const step of currentSteps.slice(0, -1)) {
+        const prediction = averageSplits[step.id];
+        if (!prediction) return null;
+        remainingMs += prediction.avgMs;
         contributingSegments += 1;
-        sampleFloor = sampleFloor === null
-          ? futurePrediction.sampleCount
-          : Math.min(sampleFloor, futurePrediction.sampleCount);
+        sampleFloor = sampleFloor === null ? prediction.sampleCount : Math.min(sampleFloor, prediction.sampleCount);
       }
-    });
+    } else {
+      let foundActiveSegment = false;
+      for (let idx = 0; idx < currentSteps.length - 1; idx += 1) {
+        const step = currentSteps[idx];
+        const nextStep = currentSteps[idx + 1];
+        const start = segments[step.id];
+        const end = segments[nextStep.id];
+
+        if (!start) continue;
+        if (end) continue;
+
+        const currentPrediction = averageSplits[step.id];
+        if (!currentPrediction) return null;
+
+        remainingMs += Math.max(0, currentPrediction.avgMs - (getDurationInMs(start, liveNow) ?? 0));
+        contributingSegments += 1;
+        sampleFloor = sampleFloor === null ? currentPrediction.sampleCount : Math.min(sampleFloor, currentPrediction.sampleCount);
+
+        for (let futureIdx = idx + 1; futureIdx < currentSteps.length - 1; futureIdx += 1) {
+          const futurePrediction = averageSplits[currentSteps[futureIdx].id];
+          if (!futurePrediction) return null;
+          remainingMs += futurePrediction.avgMs;
+          contributingSegments += 1;
+          sampleFloor = sampleFloor === null ? futurePrediction.sampleCount : Math.min(sampleFloor, futurePrediction.sampleCount);
+        }
+
+        foundActiveSegment = true;
+        break;
+      }
+
+      if (!foundActiveSegment) return null;
+    }
 
     if (contributingSegments === 0) return null;
 
@@ -529,8 +558,7 @@ const App = () => {
       eta,
       remainingMs,
       contributingSegments,
-      sampleFloor,
-      missingSegments
+      sampleFloor
     };
   }, [segments, currentSteps, averageSplits, liveNow]);
 
@@ -583,7 +611,6 @@ const App = () => {
     try {
       const run: RunRecord = {
         id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
-        category,
         mode,
         totalMs: totalTimeMs ?? 0,
         date: new Date(),
@@ -595,7 +622,6 @@ const App = () => {
 
       if (usingFirebase && db) {
         await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'runs'), {
-          category: run.category,
           mode: run.mode,
           totalMs: run.totalMs,
           date: run.date,
@@ -656,18 +682,16 @@ const App = () => {
           }
           return {
             id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
-            category: (item.category ?? 'normal') as Category,
             mode: (item.mode ?? 'forward') as Mode,
             totalMs: item.totalMs ?? 0,
             date: item.date ? new Date(item.date) : new Date(),
             segments: cleanSegments
           } as RunRecord;
-        });
+        }).filter((item) => !isNightRun(item));
 
         if (usingFirebase && db) {
           for (const item of cleaned) {
             await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'runs'), {
-              category: item.category,
               mode: item.mode,
               totalMs: item.totalMs,
               date: item.date,
@@ -736,7 +760,7 @@ const App = () => {
               </p>
               <div className="flex flex-wrap gap-2">
                 <span className="px-3 py-1 rounded-full bg-slate-900 text-white text-xs font-bold uppercase tracking-wide">
-                  {category === 'night' ? 'Night% · ' : ''}{mode === 'forward' ? 'To Work' : 'To Home'}
+                  {mode === 'forward' ? 'To Work' : 'To Home'}
                 </span>
                 {personalBest && (
                   <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold tracking-wide flex items-center gap-1">
@@ -784,32 +808,6 @@ const App = () => {
                     />
                   </div>
                 )}
-              </div>
-              {/* Category tabs */}
-              <div className="flex gap-1 rounded-2xl border border-slate-800 bg-slate-900/80 p-1">
-                {(['normal', 'night'] as Category[]).map((cat) => {
-                  const isActive = category === cat;
-                  const hasProgress = isActive && Object.keys(segments).length > 0 && !isFinished;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => {
-                        if (Object.keys(segments).length && !confirm('Switch category? This will reset splits.')) return;
-                        setCategory(cat);
-                        setSegments({});
-                      }}
-                      className={`relative flex-1 rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
-                        isActive
-                          ? cat === 'night'
-                            ? 'bg-slate-800 text-cyan-300 border border-cyan-500/30'
-                            : 'bg-slate-700 text-white'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {cat === 'night' ? 'Night%' : 'Normal%'}
-                    </button>
-                  );
-                })}
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
@@ -865,7 +863,7 @@ const App = () => {
                       <p className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
                         Active Split Board
                       </p>
-                      <h2 className="text-lg font-black text-slate-100">{category === 'night' ? 'Night% · ' : ''}{mode === 'forward' ? 'Work Route' : 'Home Route'}</h2>
+                      <h2 className="text-lg font-black text-slate-100">{mode === 'forward' ? 'Work Route' : 'Home Route'}</h2>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -1100,30 +1098,29 @@ const App = () => {
             >
               {/* SEGMENT PERFORMANCE BLOCK */}
               {detailedStats && Object.keys(detailedStats).length > 0 && (() => {
-                const statsKey = makeRunKey(statsViewCategory, statsViewMode);
-                const runCount = history.filter(
-                  (h) => (h.category ?? 'normal') === statsViewCategory && h.mode === statsViewMode
-                ).length;
+                const runCount = comparableRunsByMode[statsViewMode].length;
                 return (
                   <div className="rounded-3xl border border-slate-800 bg-slate-900/80 shadow-lg overflow-hidden">
                     <div className="px-4 py-3 border-b border-slate-800/60">
-                      <h2 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
-                        Segment Performance
-                      </h2>
+                      <div className="flex items-center justify-between gap-3">
+                        <h2 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
+                          Segment Performance
+                        </h2>
+                        <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                          Combined mirrored data
+                        </p>
+                      </div>
                     </div>
-                    {/* Compact 2×2 tab grid */}
                     <div className="grid grid-cols-2 gap-px bg-slate-800/60 border-b border-slate-800/60">
-                      {([['normal', 'forward', 'Normal% · To Work'], ['normal', 'reverse', 'Normal% · To Home'], ['night', 'forward', 'Night% · To Work'], ['night', 'reverse', 'Night% · To Home']] as [Category, Mode, string][]).map(([cat, m, label]) => {
-                        const isActive = statsViewCategory === cat && statsViewMode === m;
+                      {([['forward', 'To Work'], ['reverse', 'To Home']] as [Mode, string][]).map(([m, label]) => {
+                        const isActive = statsViewMode === m;
                         return (
                           <button
-                            key={`${cat}:${m}`}
-                            onClick={() => { setStatsViewCategory(cat); setStatsViewMode(m); }}
+                            key={m}
+                            onClick={() => setStatsViewMode(m)}
                             className={`px-2 py-2 text-[8px] font-black uppercase tracking-wider transition-colors ${
                               isActive
-                                ? cat === 'night'
-                                  ? 'bg-slate-800 text-cyan-300'
-                                  : 'bg-slate-700 text-white'
+                                ? 'bg-slate-700 text-white'
                                 : 'bg-slate-900/80 text-slate-500 hover:text-slate-300'
                             }`}
                           >
@@ -1133,7 +1130,7 @@ const App = () => {
                       })}
                     </div>
                     <div className="p-4">
-                      {detailedStats[statsKey] && detailedStats[statsKey]!.length > 0 ? (
+                      {detailedStats[statsViewMode] && detailedStats[statsViewMode]!.length > 0 ? (
                         <>
                           {runCount > 0 && (
                             <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 text-right mb-3">
@@ -1141,7 +1138,7 @@ const App = () => {
                             </p>
                           )}
                           <div className="space-y-2">
-                            {detailedStats[statsKey]!.map((stat) => {
+                            {detailedStats[statsViewMode]!.map((stat) => {
                               const colors = colorMap[stat.label] ?? 'bg-slate-800/60 border-slate-800/60 text-slate-400';
                               const isSingleRun = stat.best === stat.worst;
                               return (
@@ -1177,7 +1174,7 @@ const App = () => {
                         <div className="text-center py-6">
                           <AlertTriangle className="mx-auto h-8 w-8 text-slate-500" />
                           <p className="mt-2 text-[10px] font-bold uppercase text-slate-500">
-                            No {statsViewCategory === 'night' ? 'Night% ' : ''}{statsViewMode === 'forward' ? 'To Work' : 'To Home'} data yet
+                            No {statsViewMode === 'forward' ? 'To Work' : 'To Home'} data yet
                           </p>
                         </div>
                       )}
@@ -1189,7 +1186,7 @@ const App = () => {
               {/* RUN TIME CHARTS */}
               {(() => {
                 const chartRuns = history
-                  .filter(r => (r.category ?? 'normal') === statsViewCategory && r.mode === statsViewMode)
+                  .filter(r => !isNightRun(r) && r.mode === statsViewMode)
                   .sort((a, b) => a.date.getTime() - b.date.getTime());
                 if (chartRuns.length < 2) return null;
 
@@ -1224,7 +1221,7 @@ const App = () => {
                   );
                 };
 
-                const steps = getSteps(statsViewCategory, statsViewMode);
+                const steps = getSteps(statsViewMode);
                 const segmentSeries = steps.slice(0, -1).map((step, idx) => {
                   const nextStep = steps[idx + 1];
                   const times = chartRuns
@@ -1320,18 +1317,14 @@ const App = () => {
                           <div className="flex items-center gap-3">
                             <div
                               className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
-                                (run.category ?? 'normal') === 'night'
-                                  ? 'bg-cyan-950 text-cyan-400 border border-cyan-800/40'
-                                  : run.mode === 'forward'
-                                    ? 'bg-blue-950 text-blue-400'
-                                    : 'bg-indigo-950 text-indigo-400'
+                                run.mode === 'forward'
+                                  ? 'bg-blue-950 text-blue-400'
+                                  : 'bg-indigo-950 text-indigo-400'
                               }`}
                             >
-                              {(run.category ?? 'normal') === 'night'
-                                ? <Moon size={16} />
-                                : run.mode === 'forward'
-                                  ? <Building2 size={16} />
-                                  : <Home size={16} />}
+                              {run.mode === 'forward'
+                                ? <Building2 size={16} />
+                                : <Home size={16} />}
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-[9px] font-bold uppercase tracking-tight text-slate-500">
@@ -1340,13 +1333,11 @@ const App = () => {
                               <div className="flex items-baseline gap-2 flex-wrap">
                                 <p className="mono text-base font-black text-slate-100"><DurationDisplay ms={run.totalMs} /></p>
                                 <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md shrink-0 ${
-                                  (run.category ?? 'normal') === 'night'
-                                    ? 'text-cyan-400 bg-cyan-950'
-                                    : run.mode === 'forward'
-                                      ? 'text-blue-400 bg-blue-950'
-                                      : 'text-indigo-400 bg-indigo-950'
+                                  run.mode === 'forward'
+                                    ? 'text-blue-400 bg-blue-950'
+                                    : 'text-indigo-400 bg-indigo-950'
                                 }`}>
-                                  {(run.category ?? 'normal') === 'night' ? 'Night%' : 'Normal%'} · {run.mode === 'forward' ? 'To Work' : 'To Home'}
+                                  {run.mode === 'forward' ? 'To Work' : 'To Home'}
                                 </span>
                               </div>
                             </div>
