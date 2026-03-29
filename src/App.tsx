@@ -723,6 +723,16 @@ const App = () => {
     return duration - goldSplits[segmentId];
   };
 
+  const handleModeSwitch = (nextMode: Mode) => {
+    if (Object.keys(segments).length && !confirm('Reset split order?')) return;
+    setLiveNow(new Date());
+    setExpandedSegment(null);
+    setEditingSegment(null);
+    setEditingValue('');
+    setMode(nextMode);
+    setSegments({});
+  };
+
   return (
     <div className="min-h-screen px-4 py-6 md:py-10 md:px-10">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -811,11 +821,7 @@ const App = () => {
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
-                  onClick={() => {
-                    if (Object.keys(segments).length && !confirm('Reset split order?')) return;
-                    setMode('forward');
-                    setSegments({});
-                  }}
+                  onClick={() => handleModeSwitch('forward')}
                   className={`flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-xs font-bold uppercase tracking-widest ${
                     mode === 'forward'
                       ? 'bg-blue-600 text-white border-blue-600'
@@ -826,11 +832,7 @@ const App = () => {
                   Going to Work
                 </button>
                 <button
-                  onClick={() => {
-                    if (Object.keys(segments).length && !confirm('Reset split order?')) return;
-                    setMode('reverse');
-                    setSegments({});
-                  }}
+                  onClick={() => handleModeSwitch('reverse')}
                   className={`flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-xs font-bold uppercase tracking-widest ${
                     mode === 'reverse'
                       ? 'bg-indigo-600 text-white border-indigo-600'
