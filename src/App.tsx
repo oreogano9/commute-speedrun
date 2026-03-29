@@ -44,6 +44,7 @@ import {
 } from 'firebase/firestore';
 
 type Mode = 'forward' | 'reverse';
+type StatsMode = Mode | 'combined';
 type SegmentMap = Record<string, Date>;
 
 type RunRecord = {
@@ -158,6 +159,8 @@ const getAlignedDurations = (run: RunRecord, targetMode: Mode): Array<number | n
   if (byCanonicalSlot.some((duration) => duration === null)) return null;
   return targetSlots.map((slot) => byCanonicalSlot[slot]);
 };
+
+const getStatsSteps = (mode: StatsMode) => getSteps(mode === 'combined' ? 'forward' : mode);
 
 const formatDuration = (ms?: number | null) => {
   if (ms === null || ms === undefined || Number.isNaN(ms)) return '--';
@@ -287,7 +290,7 @@ const App = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [statsViewMode, setStatsViewMode] = useState<Mode>('forward');
+  const [statsViewMode, setStatsViewMode] = useState<StatsMode>('forward');
   const [liveNow, setLiveNow] = useState<Date>(new Date());
   const timeOfDayMinutes = useMemo(() => getMinutesIntoDay(liveNow), [liveNow]);
 
@@ -417,17 +420,25 @@ const App = () => {
     return result;
   }, [history]);
 
+  const directRunsByMode = useMemo(() => {
+    return {
+      forward: history.filter((run) => !isNightRun(run) && run.mode === 'forward'),
+      reverse: history.filter((run) => !isNightRun(run) && run.mode === 'reverse')
+    } satisfies Record<Mode, RunRecord[]>;
+  }, [history]);
+
   const detailedStats = useMemo(() => {
-    const results: Partial<Record<Mode, { label: string; avg: number; best: number; worst: number }[]>> = {};
+    const results: Partial<Record<StatsMode, { label: string; avg: number; best: number; worst: number }[]>> = {};
 
     (['forward', 'reverse'] as Mode[]).forEach((targetMode) => {
-      const comparableRuns = comparableRunsByMode[targetMode];
-      if (!comparableRuns.length) return;
+      const runs = directRunsByMode[targetMode];
+      if (!runs.length) return;
 
       const steps = getSteps(targetMode);
       const stats = steps.slice(0, -1).map((step, index) => {
-        const durations = comparableRuns
-          .map(({ durations: alignedDurations }) => alignedDurations[index])
+        const nextStep = steps[index + 1];
+        const durations = runs
+          .map((run) => getDurationInMs(run.segments[step.id], run.segments[nextStep.id]))
           .filter((value): value is number => value !== null);
         if (!durations.length) return null;
         return {
@@ -438,7 +449,7 @@ const App = () => {
         };
       }).filter((value): value is { label: string; avg: number; best: number; worst: number } => value !== null);
 
-      const totalDurations = comparableRuns.map(({ run }) => run.totalMs);
+      const totalDurations = runs.map((run) => run.totalMs);
       if (totalDurations.length) {
         stats.push({
           label: 'Total Trip',
@@ -451,13 +462,46 @@ const App = () => {
       results[targetMode] = stats;
     });
 
+    const combinedRuns = comparableRunsByMode.forward;
+    if (combinedRuns.length) {
+      const steps = getStatsSteps('combined');
+      const combinedStats = steps.slice(0, -1).map((step, index) => {
+        const durations = combinedRuns
+          .map(({ durations: alignedDurations }) => alignedDurations[index])
+          .filter((value): value is number => value !== null);
+        if (!durations.length) return null;
+        return {
+          label: step.segment ?? step.label,
+          avg: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
+          best: Math.min(...durations),
+          worst: Math.max(...durations)
+        };
+      }).filter((value): value is { label: string; avg: number; best: number; worst: number } => value !== null);
+
+      const totalDurations = combinedRuns.map(({ run }) => run.totalMs);
+      if (totalDurations.length) {
+        combinedStats.push({
+          label: 'Total Trip',
+          avg: Math.round(totalDurations.reduce((sum, value) => sum + value, 0) / totalDurations.length),
+          best: Math.min(...totalDurations),
+          worst: Math.max(...totalDurations)
+        });
+      }
+
+      results.combined = combinedStats;
+    }
+
     return results;
-  }, [comparableRunsByMode]);
+  }, [comparableRunsByMode, directRunsByMode]);
 
   const personalBest = useMemo(() => {
     const modeRuns = history.filter((run) => !isNightRun(run) && run.mode === mode);
     if (!modeRuns.length) return null;
     return Math.min(...modeRuns.map((run) => run.totalMs));
+  }, [history, mode]);
+
+  const predictiveRuns = useMemo(() => {
+    return history.filter((run) => !isNightRun(run) && run.mode === mode);
   }, [history, mode]);
 
   const goldSplits = useMemo(() => {
@@ -482,8 +526,9 @@ const App = () => {
       let weightTotal = 0;
       let sampleCount = 0;
 
-      comparableRunsByMode[mode].forEach(({ run, durations }) => {
-        const duration = durations[idx];
+      predictiveRuns.forEach((run) => {
+        const nextStep = currentSteps[idx + 1];
+        const duration = getDurationInMs(run.segments[step.id], run.segments[nextStep.id]);
         if (duration === null) return;
         const timeWeight = 1 / (1 + getCircularMinuteDistance(getMinutesIntoDay(getRunStartTime(run)), timeOfDayMinutes) / 45);
         weightedSum += duration * timeWeight;
@@ -501,7 +546,7 @@ const App = () => {
     });
 
     return averages;
-  }, [comparableRunsByMode, currentSteps, mode, timeOfDayMinutes]);
+  }, [predictiveRuns, currentSteps, timeOfDayMinutes]);
 
   const livePrediction = useMemo(() => {
     const hasStarted = Object.keys(segments).length > 0;
@@ -1100,7 +1145,9 @@ const App = () => {
             >
               {/* SEGMENT PERFORMANCE BLOCK */}
               {detailedStats && Object.keys(detailedStats).length > 0 && (() => {
-                const runCount = comparableRunsByMode[statsViewMode].length;
+                const runCount = statsViewMode === 'combined'
+                  ? comparableRunsByMode.forward.length
+                  : directRunsByMode[statsViewMode].length;
                 return (
                   <div className="rounded-3xl border border-slate-800 bg-slate-900/80 shadow-lg overflow-hidden">
                     <div className="px-4 py-3 border-b border-slate-800/60">
@@ -1108,13 +1155,15 @@ const App = () => {
                         <h2 className="text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
                           Segment Performance
                         </h2>
-                        <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                          Combined mirrored data
-                        </p>
+                        {statsViewMode === 'combined' && (
+                          <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                            Combined mirrored data
+                          </p>
+                        )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-px bg-slate-800/60 border-b border-slate-800/60">
-                      {([['forward', 'To Work'], ['reverse', 'To Home']] as [Mode, string][]).map(([m, label]) => {
+                    <div className="grid grid-cols-3 gap-px bg-slate-800/60 border-b border-slate-800/60">
+                      {([['forward', 'To Work'], ['reverse', 'To Home'], ['combined', 'Combined']] as [StatsMode, string][]).map(([m, label]) => {
                         const isActive = statsViewMode === m;
                         return (
                           <button
@@ -1187,9 +1236,13 @@ const App = () => {
 
               {/* RUN TIME CHARTS */}
               {(() => {
-                const chartRuns = history
-                  .filter(r => !isNightRun(r) && r.mode === statsViewMode)
-                  .sort((a, b) => a.date.getTime() - b.date.getTime());
+                const chartRuns = statsViewMode === 'combined'
+                  ? comparableRunsByMode.forward
+                      .map(({ run, durations }) => ({ run, durations }))
+                      .sort((a, b) => a.run.date.getTime() - b.run.date.getTime())
+                  : directRunsByMode[statsViewMode]
+                      .sort((a, b) => a.date.getTime() - b.date.getTime())
+                      .map((run) => ({ run }));
                 if (chartRuns.length < 2) return null;
 
                 const renderChart = (times: number[], color: string, height = 80) => {
@@ -1223,16 +1276,19 @@ const App = () => {
                   );
                 };
 
-                const steps = getSteps(statsViewMode);
+                const steps = getStatsSteps(statsViewMode);
                 const segmentSeries = steps.slice(0, -1).map((step, idx) => {
                   const nextStep = steps[idx + 1];
                   const times = chartRuns
-                    .map(r => getDurationInMs(r.segments[step.id], r.segments[nextStep.id]))
+                    .map((entry) => {
+                      if (statsViewMode === 'combined') return entry.durations?.[idx] ?? null;
+                      return getDurationInMs(entry.run.segments[step.id], entry.run.segments[nextStep.id]);
+                    })
                     .filter((v): v is number => v !== null && v > 0);
                   return { label: step.segment ?? step.label, stepId: step.id, times };
                 }).filter(s => s.times.length >= 2);
 
-                const totalTimes = chartRuns.map(r => r.totalMs);
+                const totalTimes = chartRuns.map((entry) => entry.run.totalMs);
                 const segmentColors: Record<string, string> = {
                   'Driving': 'rgb(251 146 60)',
                   'Walk to Stop': 'rgb(52 211 153)',
