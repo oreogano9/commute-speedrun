@@ -764,8 +764,9 @@ const App = () => {
   };
 
   const getDelta = (segmentId: string, duration: number | null) => {
-    if (!duration || !goldSplits[segmentId]) return null;
-    return duration - goldSplits[segmentId];
+    const average = averageSplits[segmentId]?.avgMs;
+    if (!duration || average === undefined) return null;
+    return duration - average;
   };
 
   const handleModeSwitch = (nextMode: Mode) => {
