@@ -69,6 +69,12 @@ type SegmentPrediction = {
   sampleCount: number;
 };
 
+type BusArrivalPrediction = {
+  arrivalTime: Date;
+  sampleCount: number;
+  inHourSampleCount: number;
+};
+
 const firebaseConfigEnv = import.meta.env.VITE_FIREBASE_CONFIG as string | undefined;
 const appId = (import.meta.env.VITE_FIREBASE_APP_ID as string | undefined) ?? 'commute-speedrun';
 const usingFirebase = Boolean(firebaseConfigEnv && firebaseConfigEnv.trim().length > 0);
@@ -133,6 +139,11 @@ const getMinutesIntoDay = (date: Date) => date.getHours() * 60 + date.getMinutes
 const getCircularMinuteDistance = (a: number, b: number) => {
   const diff = Math.abs(a - b);
   return Math.min(diff, 1440 - diff);
+};
+
+const getCircularHourDistance = (a: number, b: number) => {
+  const diff = Math.abs(a - b);
+  return Math.min(diff, 24 - diff);
 };
 
 const getRunStartTime = (run: RunRecord) => {
@@ -548,6 +559,64 @@ const App = () => {
     return averages;
   }, [predictiveRuns, currentSteps, timeOfDayMinutes]);
 
+  const busArrivalPrediction = useMemo(() => {
+    const waitSegmentIndex = currentSteps.findIndex((step, index) => {
+      if (index >= currentSteps.length - 1) return false;
+      return step.segment === 'Wait for Bus' && currentSteps[index + 1].id === 'busArrival';
+    });
+
+    if (waitSegmentIndex === -1) return null;
+
+    const waitStartStep = currentSteps[waitSegmentIndex];
+    const arrivalStep = currentSteps[waitSegmentIndex + 1];
+    const waitStartedAt = segments[waitStartStep.id];
+    const busAlreadyArrived = segments[arrivalStep.id];
+    if (!waitStartedAt || busAlreadyArrived) return null;
+
+    const currentHour = liveNow.getHours();
+    const currentWaitStartMinute = getMinutesIntoDay(waitStartedAt);
+
+    let weightedMinuteSum = 0;
+    let totalWeight = 0;
+    let sampleCount = 0;
+    let inHourSampleCount = 0;
+
+    predictiveRuns.forEach((run) => {
+      const historicalArrival = run.segments[arrivalStep.id];
+      const historicalWaitStart = run.segments[waitStartStep.id];
+      if (!historicalArrival || !historicalWaitStart) return;
+
+      const arrivalMinuteOfDay = getMinutesIntoDay(historicalArrival);
+      const arrivalHour = historicalArrival.getHours();
+      const hourDistance = getCircularHourDistance(arrivalHour, currentHour);
+      const hourWeight = arrivalHour === currentHour ? 8 : 1 / (1 + hourDistance * 2);
+      const waitStartWeight = 1 / (1 + getCircularMinuteDistance(getMinutesIntoDay(historicalWaitStart), currentWaitStartMinute) / 20);
+      const totalSampleWeight = hourWeight * waitStartWeight;
+
+      weightedMinuteSum += arrivalMinuteOfDay * totalSampleWeight;
+      totalWeight += totalSampleWeight;
+      sampleCount += 1;
+      if (arrivalHour === currentHour) inHourSampleCount += 1;
+    });
+
+    if (!sampleCount || !totalWeight) return null;
+
+    const predictedMinuteOfDay = Math.round(weightedMinuteSum / totalWeight);
+    const arrivalTime = new Date(liveNow);
+    arrivalTime.setHours(0, 0, 0, 0);
+    arrivalTime.setMinutes(predictedMinuteOfDay);
+
+    if (arrivalTime.getTime() < waitStartedAt.getTime()) {
+      arrivalTime.setDate(arrivalTime.getDate() + 1);
+    }
+
+    return {
+      arrivalTime,
+      sampleCount,
+      inHourSampleCount
+    };
+  }, [currentSteps, segments, predictiveRuns, liveNow]);
+
   const livePrediction = useMemo(() => {
     const hasStarted = Object.keys(segments).length > 0;
 
@@ -862,6 +931,24 @@ const App = () => {
                         width: `${(Object.keys(segments).length / currentSteps.length) * 100}%`
                       }}
                     />
+                  </div>
+                )}
+                {busArrivalPrediction && (
+                  <div className="mt-4 rounded-2xl border border-sky-500/20 bg-sky-500/10 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-sky-200/80">
+                          Bus Prediction
+                        </p>
+                        <p className="mono text-2xl font-bold text-sky-300">
+                          {formatArrivalTime(busArrivalPrediction.arrivalTime)}
+                        </p>
+                      </div>
+                      <div className="text-right text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                        <p>{busArrivalPrediction.sampleCount} samples</p>
+                        <p>{busArrivalPrediction.inHourSampleCount} this hour</p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
